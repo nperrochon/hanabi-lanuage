@@ -20,6 +20,7 @@ from . import pyhanabi
 from .pyhanabi import color_char_to_idx
 from gym.spaces import Discrete
 import numpy as np
+from onpolicy.envs.hanabi.llm_action_helper import get_llm_obs_vector
 
 MOVE_TYPES = [_.name for _ in pyhanabi.HanabiMoveType]
 
@@ -165,6 +166,14 @@ class HanabiEnv(Environment):
 
         self.game = pyhanabi.HanabiGame(config)
         self.obs_instead_of_state = args.use_obs_instead_of_state
+        self.use_llm = getattr(args, 'use_llm', False)
+        self.llm_model = getattr(args, 'llm_model', 'qwen2:7b')
+        self.llm_step_prob = float(getattr(args, "llm_step_prob", 1.0))  # 1.0 = every step
+        if self.llm_step_prob < 1.0:
+            print(f"LLM step probability: {self.llm_step_prob}")
+
+        self.runs_with_llm = 0
+        self.runs_without_llm = 0
 
         self.observation_encoder = pyhanabi.ObservationEncoder(
             self.game, pyhanabi.ObservationEncoderType.CANONICAL)
@@ -172,18 +181,60 @@ class HanabiEnv(Environment):
         self.action_space = []
         self.observation_space = []
         self.share_observation_space = []
+        obs_dim = self.vectorized_observation_shape()[0] + self.players
+        share_dim = self.vectorized_share_observation_shape()[0] + self.players
+        if self.use_llm:
+            # Append LLM one-hot suggestion vector (length num_moves) to obs and share_obs
+            obs_dim += self.num_moves() + 1
+            share_dim += self.num_moves() + 1
         for i in range(self.players):
             self.action_space.append(Discrete(self.num_moves()))
-            self.observation_space.append(
-                [self.vectorized_observation_shape()[0]+self.players])
-            self.share_observation_space.append(
-                [self.vectorized_share_observation_shape()[0]+self.players])
+            self.observation_space.append([obs_dim])
+            self.share_observation_space.append([share_dim])
+
+        # Reuse one LLM client and track valid suggestion rate (for debugging)
+        self._llm_client = None
+        self._llm_nonzero_count = 0
+        self._llm_total_count = 0
+        if self.use_llm:
+            from onpolicy.envs.hanabi.llm_action_helper import HanabiOllamaClient
+            self._llm_client = HanabiOllamaClient(model_name=self.llm_model)
+            self._llm_client.verify()  # fail at startup if Ollama/model not ready
 
     def seed(self, seed=None):
         if seed is None:
             np.random.seed(1)
         else:
             np.random.seed(seed)
+
+    def _append_llm_vector(self, obs, share_obs):
+        if not self.use_llm:
+            return obs, share_obs
+
+        used_flag = 0.0 # so policy knows if we used LLM or not
+        llm_vector = np.zeros(self.num_moves(), dtype=np.float32)
+
+        # Decide whether to call LLM
+        if np.random.rand() <= getattr(self, "llm_step_prob", 1.0):
+            llm_context = self.get_llm_context()
+            llm_vector = get_llm_obs_vector(
+                llm_context, self.num_moves(), client=self._llm_client
+            )
+            used_flag = 1.0
+            self._llm_total_count += 1
+            if np.any(llm_vector != 0):
+                self._llm_nonzero_count += 1
+            self.runs_with_llm += 1
+        else:
+            self.runs_without_llm += 1
+
+        extra = np.concatenate(
+            [llm_vector, np.asarray([used_flag], dtype=np.float32)],
+            axis=0,
+        )
+        obs = np.concatenate([np.asarray(obs, dtype=np.float32), extra], axis=-1)
+        share_obs = np.concatenate([np.asarray(share_obs, dtype=np.float32), extra], axis=-1)
+        return obs, share_obs
 
     def reset(self, choose=True):
         """Resets the environment for a new game.
@@ -295,7 +346,7 @@ class HanabiEnv(Environment):
             current_player = self.state.cur_player()
             observation["current_player"] = current_player
             player_observations = observation['player_observations']
-            
+
             agent_turn = np.zeros(self.players, dtype=np.int).tolist()
             agent_turn[current_player] = 1
 
@@ -309,9 +360,15 @@ class HanabiEnv(Environment):
                 share_obs = np.concatenate((concat_obs, agent_turn), axis=0)
             else:
                 share_obs = player_observations[current_player]['vectorized_ownhand'] + player_observations[current_player]['vectorized'] + agent_turn
+            obs, share_obs = self._append_llm_vector(obs, share_obs)
         else:
-            obs = np.zeros(self.vectorized_observation_shape()[0]+self.players)
-            share_obs = np.zeros(self.vectorized_share_observation_shape()[0]+self.players)
+            base_obs_dim = self.vectorized_observation_shape()[0] + self.players
+            base_share_dim = self.vectorized_share_observation_shape()[0] + self.players
+            if self.use_llm:
+                base_obs_dim += self.num_moves() + 1
+                base_share_dim += self.num_moves() + 1
+            obs = np.zeros(base_obs_dim, dtype=np.float32)
+            share_obs = np.zeros(base_share_dim, dtype=np.float32)
             available_actions = np.zeros(self.num_moves())
         return obs, share_obs, available_actions
 
@@ -344,6 +401,39 @@ class HanabiEnv(Environment):
           Integer, number of moves.
         """
         return self.game.max_moves()
+
+    def get_llm_context(self):
+        """Return serializable context for LLM action recommendation (for subprocess workers).
+        This needs to be serialized because Python multiprocessing can't handle arbitrary objects being passed
+        back and forth between processes, so trying to pass a C object directly to the LLM workers
+        might cause some kind of pickle error. This explicitly converts everything before we return.
+
+        Returns:
+          tuple: (text_observation, legal_moves_dicts, legal_move_uids, game_info)
+          or None if not the current player's turn or state unavailable.
+        """
+        try:
+            cur_player = self.state.cur_player()
+            if cur_player == pyhanabi.CHANCE_PLAYER_ID:
+                return None
+            obs = self.state.observation(cur_player)
+            text_obs = obs.text_observation()
+            legal_moves = obs.legal_moves()
+            legal_moves_dicts = [m.to_dict() for m in legal_moves]
+            legal_move_uids = [self.game.get_move_uid(m) for m in legal_moves]
+            fireworks_list = self.state.fireworks()
+            game_info = {
+                "fireworks": {pyhanabi.COLOR_CHAR[i]: fireworks_list[i]
+                             for i in range(len(fireworks_list))},
+                "information_tokens": self.state.information_tokens(),
+                "life_tokens": self.state.life_tokens(),
+                "deck_size": self.state.deck_size(),
+            }
+            return (text_obs, legal_moves_dicts, legal_move_uids, game_info)
+        except Exception as e:
+            print(e)
+            return None
+
 
     def step(self, action):
         """Take one step in the game.
@@ -459,8 +549,13 @@ class HanabiEnv(Environment):
             action = self._build_move(action)
         elif isinstance(action, int):
             if action == -1:  # invalid action
-                obs = np.zeros(self.vectorized_observation_shape()[0]+self.players)
-                share_obs = np.zeros(self.vectorized_share_observation_shape()[0]+self.players)
+                base_obs_dim = self.vectorized_observation_shape()[0] + self.players
+                base_share_dim = self.vectorized_share_observation_shape()[0] + self.players
+                if self.use_llm:
+                    base_obs_dim += self.num_moves() + 1
+                    base_share_dim += self.num_moves() + 1
+                obs = np.zeros(base_obs_dim, dtype=np.float32)
+                share_obs = np.zeros(base_share_dim, dtype=np.float32)
                 rewards = np.zeros((self.players, 1))
                 done = None
                 infos = {'score': self.state.score()}
@@ -496,11 +591,18 @@ class HanabiEnv(Environment):
         else:
             share_obs = player_observations[current_player]['vectorized_ownhand'] + player_observations[current_player]['vectorized'] + agent_turn
 
+        obs, share_obs = self._append_llm_vector(obs, share_obs)
+
         done = self.state.is_terminal()
         # Reward is score differential. May be large and negative at game end.
         reward = self.state.score() - last_score
         rewards = [[reward]] * self.players
         infos = {'score': self.state.score()}
+        if self.use_llm and self._llm_total_count > 0:
+            infos['llm_suggestion_rate'] = (self._llm_nonzero_count, self._llm_total_count)
+            infos['llm_runs_with_llm'] = self.runs_with_llm
+            infos['llm_runs_without_llm'] = self.runs_without_llm
+            infos['llm_use_rate'] = self.runs_with_llm / (self.runs_with_llm + self.runs_without_llm)
 
         return obs, share_obs, rewards, done, infos, available_actions
 

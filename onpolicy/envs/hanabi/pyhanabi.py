@@ -820,6 +820,81 @@ class HanabiObservation(object):
     """Returns the C++ HanabiObservation object."""
     return self._observation
 
+  def text_observation(self):
+    """Returns a text representation of the current player's card knowledge.
+
+    Converts the vectorized card knowledge representation into natural language
+    descriptions of what is known about each card in each player's hand.
+    This is helpful in creating human-readable game state observations.
+
+    Returns:
+      str: A multi-line string describing card knowledge for all players.
+    """
+    card_knowledge_list = self.card_knowledge()
+    num_colors = lib.NumColors(self._game)
+    num_ranks = lib.NumRanks(self._game)
+
+    descriptions = []
+
+    for pid, player_knowledge in enumerate(card_knowledge_list):
+      if pid == 0:
+        player_label = "Your hand"
+      else:
+        player_label = f"Player {pid}'s hand"
+
+      if not player_knowledge:
+        descriptions.append(f"{player_label}: (empty)")
+        continue
+
+      card_descriptions = []
+      for card_idx, knowledge in enumerate(player_knowledge):
+        card_desc_parts = []
+
+        # Check for directly known color
+        known_color = knowledge.color()
+        if known_color is not None:
+          color_char = COLOR_CHAR[known_color]
+          card_desc_parts.append(f"color {color_char}")
+        else:
+          # List plausible colors
+          plausible_colors = [COLOR_CHAR[i] for i in range(num_colors)
+                             if knowledge.color_plausible(i)]
+          if len(plausible_colors) == num_colors:
+            card_desc_parts.append("any color")
+          elif len(plausible_colors) == 1:
+            card_desc_parts.append(f"color {plausible_colors[0]}")
+          elif len(plausible_colors) > 0:
+            card_desc_parts.append(f"color {'/'.join(plausible_colors)}")
+          else:
+            card_desc_parts.append("unknown color")
+
+        # Check for directly known rank
+        known_rank = knowledge.rank()
+        if known_rank is not None:
+          rank_value = known_rank + 1  # Convert 0-based to 1-based
+          card_desc_parts.append(f"rank {rank_value}")
+        else:
+          # List plausible ranks
+          plausible_ranks = [i + 1 for i in range(num_ranks)
+                           if knowledge.rank_plausible(i)]
+          if len(plausible_ranks) == num_ranks:
+            card_desc_parts.append("any rank")
+          elif len(plausible_ranks) == 1:
+            card_desc_parts.append(f"rank {plausible_ranks[0]}")
+          elif len(plausible_ranks) > 0:
+            card_desc_parts.append(f"rank {'/'.join(map(str, plausible_ranks))}")
+          else:
+            card_desc_parts.append("unknown rank")
+
+        card_desc = f"Card {card_idx + 1}: " + ", ".join(card_desc_parts)
+        card_descriptions.append(card_desc)
+
+      descriptions.append(f"{player_label}:")
+      descriptions.extend(f"  {desc}" for desc in card_descriptions)
+
+    return "\n".join(descriptions)
+
+
   def cur_player_offset(self):
     """Returns the player index of the acting player, relative to observer."""
     return lib.ObsCurPlayerOffset(self._observation)

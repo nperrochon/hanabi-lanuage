@@ -1,4 +1,4 @@
-    
+
 import time
 import wandb
 import os
@@ -17,13 +17,18 @@ class HanabiRunner(Runner):
     def __init__(self, config):
         super(HanabiRunner, self).__init__(config)
         self.true_total_num_steps = 0
-    
-    def run(self):
+        self._llm_diagnostic_calls = 0  # count env step() calls for LLM rate printing
+        self._llm_diagnostic_prev_total = (0, 0)  # (prev_nonzero, prev_calls) for windowed rate
+        # With LLM, also log average score every N env steps (doesn't rely on completing episodes)
+        self._llm_next_log_steps = 800
+        # With LLM, episodes are slow; log every episode so average score prints often
+        if getattr(self.all_args, 'use_llm', False):
+            self.log_interval = 1
         self.turn_obs = np.zeros((self.n_rollout_threads,*self.buffer.obs.shape[2:]), dtype=np.float32)
         self.turn_share_obs = np.zeros((self.n_rollout_threads,*self.buffer.share_obs.shape[2:]), dtype=np.float32)
         self.turn_available_actions = np.zeros((self.n_rollout_threads,*self.buffer.available_actions.shape[2:]), dtype=np.float32)
         self.turn_values = np.zeros((self.n_rollout_threads,*self.buffer.value_preds.shape[2:]), dtype=np.float32)
-        self.turn_actions = np.zeros((self.n_rollout_threads,*self.buffer.actions.shape[2:]), dtype=np.float32)       
+        self.turn_actions = np.zeros((self.n_rollout_threads,*self.buffer.actions.shape[2:]), dtype=np.float32)
         self.turn_action_log_probs = np.zeros((self.n_rollout_threads,*self.buffer.action_log_probs.shape[2:]), dtype=np.float32)
         self.turn_rnn_states = np.zeros((self.n_rollout_threads,*self.buffer.rnn_states.shape[2:]), dtype=np.float32)
         self.turn_rnn_states_critic = np.zeros_like(self.turn_rnn_states)
@@ -34,20 +39,24 @@ class HanabiRunner(Runner):
 
         self.turn_rewards_since_last_action = np.zeros_like(self.turn_rewards)
 
-        self.warmup()   
+        self.warmup()
+
+        if getattr(self.all_args, 'use_llm', False):
+            print("[LLM] diagnostic enabled: suggestion rate will print every 500 env steps.")
 
         start = time.time()
         episodes = int(self.num_env_steps) // self.episode_length // self.n_rollout_threads
+
+        self.scores = []
 
         for episode in range(episodes):
             if self.use_linear_lr_decay:
                 self.trainer.policy.lr_decay(episode, episodes)
 
-            self.scores = []
             for step in range(self.episode_length):
                 self.reset_choose = np.zeros(self.n_rollout_threads) == 1.0
                 # Sample actions
-                self.collect(step) 
+                self.collect(step)
 
                 if step == 0 and episode > 0:
                     # deal with the data of the last index in buffer
@@ -86,14 +95,18 @@ class HanabiRunner(Runner):
                 self.use_obs[self.reset_choose] = obs[self.reset_choose]
                 self.use_share_obs[self.reset_choose] = share_obs[self.reset_choose]
                 self.use_available_actions[self.reset_choose] = available_actions[self.reset_choose]
-            
+
             # post process
-            total_num_steps = (episode + 1) * self.episode_length * self.n_rollout_threads           
+            total_num_steps = (episode + 1) * self.episode_length * self.n_rollout_threads
             # save model
             if (episode % self.save_interval == 0 or episode == episodes - 1):
                 self.save()
 
-            # log information
+            if getattr(self.all_args, 'use_llm', False):
+                self.log_interval = 1
+
+            # log information (every log_interval episodes; 1 episode = episode_length * n_rollout_threads env steps)
+            # print(episode, self.log_interval)
             if episode % self.log_interval == 0 and episode > 0:
                 end = time.time()
                 print("\n Env {} Algo {} Exp {} updates {}/{} episodes, total num timesteps {}/{}, FPS {}.\n"
@@ -104,20 +117,56 @@ class HanabiRunner(Runner):
                                 episodes,
                                 total_num_steps,
                                 self.num_env_steps,
-                                int(total_num_steps / (end - start))))
+                                int(total_num_steps / (end - start))), flush=True)
 
                 if self.env_name == "Hanabi":
                     average_score = np.mean(self.scores) if len(self.scores) > 0 else 0.0
-                    print("average score is {}.".format(average_score))
+
+                    print("average score is {}.".format(average_score), flush=True)
                     if self.use_wandb:
-                        wandb.log({'average_score': average_score}, step = self.true_total_num_steps)
+                        wandb.log({'average_score': average_score,
+                         "episodes_scored": len(self.scores)},
+                        step = self.true_total_num_steps)
+                        self.scores = []
                     else:
                         self.writter.add_scalars('average_score', {'average_score': average_score}, self.true_total_num_steps)
+                        self.scores = []
+
+                    if getattr(self.all_args, 'use_llm', True):
+                        print(f"LLM runs with LLM: {self.envs.envs[0].runs_with_llm}")
+                        print(f"LLM runs without LLM: {self.envs.envs[0].runs_without_llm}")
+                        print(f"LLM use rate: {self.envs.envs[0].runs_with_llm / (self.envs.envs[0].runs_with_llm + self.envs.envs[0].runs_without_llm)}")
 
                 train_infos["average_step_rewards"] = np.mean(self.buffer.rewards)
-                
-                self.log_train(train_infos, self.true_total_num_steps)
 
+                self.log_train(train_infos, self.true_total_num_steps)
+            print("Done logging")
+            # --- Debug: current game state, legal moves, observations (for first env thread) ---
+            tid = 0
+            print("[Debug] Observations (thread {}): shape obs={}, share_obs={}".format(
+                tid, self.use_obs.shape, self.use_share_obs.shape))
+            print("  obs[{}] (first 20): {}".format(tid, self.use_obs[tid][:20]))
+            print("  share_obs[{}] (first 20): {}".format(tid, self.use_share_obs[tid][:20]))
+            legal_uids = np.where(self.use_available_actions[tid] == 1.0)[0]
+            print("[Debug] Legal moves (thread {}): {} actions -> UIDs {}".format(
+                tid, len(legal_uids), legal_uids.tolist()))
+            # Human-readable game state only when envs are in-process (ChooseDummyVecEnv)
+            if hasattr(self.envs, 'envs') and len(self.envs.envs) > 0:
+                try:
+                    llm_ctx = self.envs.envs[tid].get_llm_context()
+                    if llm_ctx is not None:
+                        text_obs, legal_moves_dicts, legal_move_uids, game_info = llm_ctx
+                        print("[Debug] Game state (text):\n{}".format(text_obs))
+                        print("[Debug] Game info: fireworks={} info_tokens={} life_tokens={} deck_size={}".format(
+                            game_info.get("fireworks"), game_info.get("information_tokens"),
+                            game_info.get("life_tokens"), game_info.get("deck_size")))
+                        print("[Debug] Legal moves (human): {}".format(legal_moves_dicts))
+                    else:
+                        print("[Debug] Game state: get_llm_context() returned None (e.g. chance player)")
+                except Exception as e:
+                    print("[Debug] Game state: could not get ({}). Use DummyVecEnv for in-process state.".format(e))
+            else:
+                print("[Debug] Game state: use ChooseDummyVecEnv (n_rollout_threads=1) to print human-readable state.")
             # eval
             if episode % self.eval_interval == 0 and self.use_eval:
                 self.eval(self.true_total_num_steps)
@@ -142,7 +191,7 @@ class HanabiRunner(Runner):
             if ~np.any(choose):
                 self.reset_choose = np.ones(self.n_rollout_threads) == 1.0
                 break
-            
+
             self.trainer.prep_rollout()
             value, action, action_log_prob, rnn_state, rnn_state_critic \
                 = self.trainer.policy.get_actions(self.use_share_obs[choose],
@@ -151,7 +200,7 @@ class HanabiRunner(Runner):
                                                 self.turn_rnn_states_critic[choose, current_agent_id],
                                                 self.turn_masks[choose, current_agent_id],
                                                 self.use_available_actions[choose])
-            
+
             self.turn_obs[choose, current_agent_id] = self.use_obs[choose].copy()
             self.turn_share_obs[choose, current_agent_id] = self.use_share_obs[choose].copy()
             self.turn_available_actions[choose, current_agent_id] = self.use_available_actions[choose].copy()
@@ -163,7 +212,32 @@ class HanabiRunner(Runner):
             self.turn_rnn_states_critic[choose, current_agent_id] = _t2n(rnn_state_critic)
 
             obs, share_obs, rewards, dones, infos, available_actions = self.envs.step(env_actions)
-            
+
+            # LLM usage diagnostic (main process; envs run in subprocesses so we read from infos)
+            if getattr(self.all_args, 'use_llm', False) and infos is not None and len(infos) > 0:
+                self._llm_diagnostic_calls += self.n_rollout_threads
+                if self._llm_diagnostic_calls >= 500:
+                    total_nonzero, total_calls = 0, 0
+                    for inf in infos:
+                        r = inf.get('llm_suggestion_rate') if isinstance(inf, dict) else None
+                        if r is not None and len(r) >= 2:
+                            total_nonzero += r[0]
+                            total_calls += r[1]
+                    if total_calls > 0:
+                        prev_nz, prev_c = self._llm_diagnostic_prev_total
+                        delta_calls = total_calls - prev_c
+                        if delta_calls > 0:
+                            rate = 100.0 * (total_nonzero - prev_nz) / delta_calls
+                            print("[LLM] suggestion rate (non-zero): {:.1f}% ({}/{}) [last 500 steps]".format(
+                                rate, total_nonzero - prev_nz, delta_calls))
+                        else:
+                            rate = 100.0 * total_nonzero / total_calls
+                            print("[LLM] suggestion rate (non-zero): {:.1f}% ({}/{}) [cumulative]".format(
+                                rate, total_nonzero, total_calls))
+                        self._llm_diagnostic_prev_total = (total_nonzero, total_calls)
+                    else:
+                        print("[LLM] diagnostic: no llm_suggestion_rate in infos (run from hanabi-lanuage so env and runner match).")
+                    self._llm_diagnostic_calls = 0
             self.true_total_num_steps += (choose==True).sum()
             share_obs = share_obs if self.use_centralized_V else obs
 
@@ -196,10 +270,10 @@ class HanabiRunner(Runner):
             left_agent_id = current_agent_id + 1
             left_agents_num = self.num_agents - left_agent_id
             self.turn_active_masks[dones == True, left_agent_id:] = np.zeros(((dones == True).sum(), left_agents_num, 1), dtype=np.float32)
-            
+
             self.turn_rewards[dones == True, left_agent_id:] = self.turn_rewards_since_last_action[dones == True, left_agent_id:]
             self.turn_rewards_since_last_action[dones == True, left_agent_id:] = np.zeros(((dones == True).sum(), left_agents_num, 1), dtype=np.float32)
-            
+
             # other variables use what at last time, action will be useless.
             self.turn_values[dones == True, left_agent_id:] = np.zeros(((dones == True).sum(), left_agents_num, 1), dtype=np.float32)
             self.turn_obs[dones == True, left_agent_id:] = 0
@@ -217,14 +291,14 @@ class HanabiRunner(Runner):
                 if done:
                     if 'score' in info.keys():
                         self.scores.append(info['score'])
-            
-   
+
+
     def train(self):
         self.trainer.prep_training()
-        train_infos = self.trainer.train(self.buffer)      
+        train_infos = self.trainer.train(self.buffer)
         self.buffer.chooseafter_update()
         return train_infos
-  
+
     @torch.no_grad()
     def eval(self, total_num_steps):
         eval_envs = self.eval_envs
@@ -233,7 +307,7 @@ class HanabiRunner(Runner):
 
         eval_finish = False
         eval_reset_choose = np.ones(self.n_eval_rollout_threads) == 1.0
-        
+
         eval_obs, eval_share_obs, eval_available_actions = eval_envs.reset(eval_reset_choose)
 
         eval_rnn_states = np.zeros((self.n_eval_rollout_threads, *self.buffer.rnn_states.shape[2:]), dtype=np.float32)
@@ -262,7 +336,7 @@ class HanabiRunner(Runner):
 
                 # Obser reward and next obs
                 eval_obs, eval_share_obs, eval_rewards, eval_dones, eval_infos, eval_available_actions = eval_envs.step(eval_actions)
-                
+
                 eval_available_actions[eval_dones == True] = np.zeros(((eval_dones == True).sum(), *self.buffer.available_actions.shape[3:]), dtype=np.float32)
 
                 for eval_done, eval_info in zip(eval_dones, eval_infos):
@@ -277,7 +351,7 @@ class HanabiRunner(Runner):
         else:
             self.writter.add_scalars('eval_average_score', {'eval_average_score': eval_average_score}, total_num_steps)
 
-    
+
     @torch.no_grad()
     def eval_100k(self, eval_games=100000):
         eval_envs = self.eval_envs
@@ -288,7 +362,7 @@ class HanabiRunner(Runner):
             print("trail is {}".format(trial))
             eval_finish = False
             eval_reset_choose = np.ones(self.n_eval_rollout_threads) == 1.0
-            
+
             eval_obs, eval_share_obs, eval_available_actions = eval_envs.reset(eval_reset_choose)
 
             eval_rnn_states = np.zeros((self.n_eval_rollout_threads, *self.buffer.rnn_states.shape[2:]), dtype=np.float32)
@@ -317,7 +391,7 @@ class HanabiRunner(Runner):
 
                     # Obser reward and next obs
                     eval_obs, eval_share_obs, eval_rewards, eval_dones, eval_infos, eval_available_actions = eval_envs.step(eval_actions)
-                    
+
                     eval_available_actions[eval_dones == True] = np.zeros(((eval_dones == True).sum(), *self.buffer.available_actions.shape[3:]), dtype=np.float32)
 
                     for eval_done, eval_info in zip(eval_dones, eval_infos):
@@ -326,4 +400,3 @@ class HanabiRunner(Runner):
                                 eval_scores.append(eval_info['score'])
 
         eval_average_score = np.mean(eval_scores)
-        print("eval average score is {}.".format(eval_average_score))

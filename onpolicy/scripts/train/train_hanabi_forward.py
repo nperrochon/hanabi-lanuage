@@ -59,13 +59,29 @@ def make_eval_env(all_args):
 
 
 def parse_args(args, parser):
+    # --env_name is already added by get_config(); only add Hanabi-specific args.
     parser.add_argument('--hanabi_name', type=str,
                         default='Hanabi-Very-Small', help="Which env to run on")
     parser.add_argument('--num_agents', type=int,
                         default=2, help="number of players")
+    # Only add LLM args if not already present (e.g. from config).
+    if not any(a.dest == 'use_llm' for a in parser._actions):
+        parser.add_argument('--use_llm', action='store_true', default=False,
+                            help="Append Ollama LLM action recommendation to observations (requires Ollama running).")
+    if not any(a.dest == 'llm_model' for a in parser._actions):
+        parser.add_argument('--llm_model', type=str, default='qwen2:7b',
+                            help="Ollama model tag when --use_llm (e.g. qwen2:7b, llama3.2).")
+
+    if not any(a.dest == 'llm_step_prob' for a in parser._actions):
+        parser.add_argument('--llm_step_prob', type=float, default=1.0,
+                            help="Probability of using LLM action recommendation at each step (0.0 = never, 1.0 = always).")
 
     all_args = parser.parse_known_args(args)[0]
-
+    if not any(x == '--env_name' or x.startswith('--env_name=') for x in args):
+        all_args.env_name = 'Hanabi'
+    # Default wandb entity to user's workspace when not explicitly set
+    if not any(x == '--user_name' or x.startswith('--user_name=') for x in args):
+        all_args.user_name = 'nperroch-uci'
     return all_args
 
 
@@ -79,7 +95,7 @@ def main(args):
         all_args.use_naive_recurrent_policy = False
     elif all_args.algorithm_name == "mappo":
         print("u are choosing to use mappo, we set use_recurrent_policy & use_naive_recurrent_policy to be False")
-        all_args.use_recurrent_policy = False 
+        all_args.use_recurrent_policy = False
         all_args.use_naive_recurrent_policy = False
     elif all_args.algorithm_name == "ippo":
         print("u are choosing to use ippo, we set use_centralized_V to be False")
@@ -140,6 +156,18 @@ def main(args):
     torch.manual_seed(all_args.seed)
     torch.cuda.manual_seed_all(all_args.seed)
     np.random.seed(all_args.seed)
+
+    # Make it explicit whether LLM is used (default: False)
+    use_llm = getattr(all_args, 'use_llm', False)
+    print("use_llm: {}".format(use_llm))
+    if use_llm:
+        print("llm_model: {}".format(getattr(all_args, 'llm_model', 'qwen2:7b')))
+        # With an LLM in the loop, each env step is expensive. Shorten episode_length
+        # so we get more frequent policy updates for the same num_env_steps.
+        # (Keep it at least 50 to preserve some temporal structure.)
+        old_len = all_args.episode_length
+        all_args.episode_length = max(50, old_len // 2)
+        print("Using shorter episode_length with LLM: {} -> {}".format(old_len, all_args.episode_length))
 
     # env init
     envs = make_train_env(all_args)
