@@ -201,7 +201,7 @@ def main(args):
         )
 
     runner = Runner(config)
-    runner.eval_100k()
+    runner.eval_100k(eval_games=all_args.eval_episodes)
 
     # post process
     envs.close()

@@ -19,6 +19,8 @@ class HanabiRunner(Runner):
     def __init__(self, config):
         super(HanabiRunner, self).__init__(config)
         self.true_total_num_steps = 0
+        self.true_total_updates = 0
+        self.save_every_x_updates = self.all_args.save_every_x_updates
         self._llm_diagnostic_calls = 0  # count env step() calls for LLM rate printing
         self._llm_diagnostic_prev_total = (
             0,
@@ -29,6 +31,8 @@ class HanabiRunner(Runner):
         # With LLM, episodes are slow; log every episode so average score prints often
         if getattr(self.all_args, "use_llm", False):
             self.log_interval = 1
+
+        # Create empty buckets for the information for this turn
         self.turn_obs = np.zeros(
             (self.n_rollout_threads, *self.buffer.obs.shape[2:]), dtype=np.float32
         )
@@ -73,19 +77,18 @@ class HanabiRunner(Runner):
                 "[LLM] diagnostic enabled: suggestion rate will print every 500 env steps."
             )
 
-        self._save_interval_steps = int(
-            getattr(self.all_args, "save_interval_steps", 0) or 0
-        )
-        self._next_step_checkpoint = (
-            self._save_interval_steps if self._save_interval_steps > 0 else None
-        )
-        if self._next_step_checkpoint:
-            print(
-                "Step checkpoints: every {} env steps -> models/actor_step_N.pt".format(
-                    self._save_interval_steps
-                )
-            )
+        # self._save_interval_steps = int(
+        #     getattr(self.all_args, "save_interval_steps", 0) or 0
+        # )
 
+        # if self._next_step_checkpoint:
+        #     print(
+        #         "Step checkpoints: every {} env steps -> models/actor_step_N.pt".format(
+        #             self._save_interval_steps
+        #         )
+        #     )
+
+    def run(self):
         start = time.time()
         episodes = (
             int(self.num_env_steps) // self.episode_length // self.n_rollout_threads
@@ -122,6 +125,12 @@ class HanabiRunner(Runner):
                     # compute return and update network
                     self.compute()
                     train_infos = self.train()
+                    self.true_total_updates += 1
+                    if self.true_total_updates % self.save_every_x_updates == 0:
+                        self.save(update_num=self.true_total_updates)
+                        print(
+                            f"[SUCCESS] Policy update {self.true_total_updates} saved."
+                        )
 
                 # insert turn data into buffer
                 self.buffer.chooseinsert(
@@ -153,23 +162,21 @@ class HanabiRunner(Runner):
                 (episode + 1) * self.episode_length * self.n_rollout_threads
             )
             # save model
-            if episode % self.save_interval == 0 or episode == episodes - 1:
-                self.save(episode)
-
+            # if episode % self.save_interval == 0 or episode == episodes - 1:
+            #     self.save(episode)
+            self.log_interval = self.all_args.log_interval
             if getattr(self.all_args, "use_llm", False):
                 self.log_interval = 1
 
             # log information (every log_interval episodes; 1 episode = episode_length * n_rollout_threads env steps)
-            # print(episode, self.log_interval)
             if episode % self.log_interval == 0 and episode > 0:
                 end = time.time()
                 average_score = (
-                    (float(np.mean(self.scores)) if len(self.scores) > 0 else 0.0)
-                    if self.env_name == "Hanabi"
-                    else None
+                    float(np.mean(self.scores)) if len(self.scores) > 0 else 0.0
                 )
+                max_score = float(np.max(self.scores)) if len(self.scores) > 0 else 0.0
                 # Hanabi: only print / log run-level score metrics when the game score improved past zero.
-                log_run_metrics = self.env_name != "Hanabi" or average_score > 0.0
+                log_run_metrics = average_score > 0.0
 
                 if log_run_metrics:
                     print(
@@ -186,96 +193,52 @@ class HanabiRunner(Runner):
                         flush=True,
                     )
 
-                if self.env_name == "Hanabi":
-                    if log_run_metrics:
-                        print("average score is {}.".format(average_score), flush=True)
-                        if self.use_wandb:
-                            wandb.log(
-                                {
-                                    "average_score": average_score,
-                                    "episodes_scored": len(self.scores),
-                                },
-                                step=self.true_total_num_steps,
-                            )
-                        else:
-                            self.writter.add_scalars(
-                                "average_score",
-                                {"average_score": average_score},
-                                self.true_total_num_steps,
-                            )
+                if log_run_metrics:
+                    print("average score is {}.".format(average_score), flush=True)
+                    print("MAX score is {}.".format(max_score), flush=True)
+                    if self.use_wandb:
+                        wandb.log(
+                            {
+                                "average_score": average_score,
+                                "max_score": max_score,
+                                "episodes_scored": len(self.scores),
+                            },
+                            step=self.true_total_num_steps,
+                        )
+                    else:
+                        self.writter.add_scalars(
+                            "average_score",
+                            {"average_score": average_score},
+                            self.true_total_num_steps,
+                        )
+                        self.writter.add_scalars(
+                            "max_score",
+                            {"max_score": max_score},
+                            self.true_total_num_steps,
+                        )
 
-                        if getattr(self.all_args, "use_llm", False):
-                            print(
-                                f"LLM runs with LLM: {self.envs.envs[0].runs_with_llm}"
-                            )
-                            print(
-                                f"LLM runs without LLM: {self.envs.envs[0].runs_without_llm}"
-                            )
-                            print(
-                                f"LLM use rate: {self.envs.envs[0].runs_with_llm / (self.envs.envs[0].runs_with_llm + self.envs.envs[0].runs_without_llm)}"
-                            )
+                    if getattr(self.all_args, "use_llm", False):
+                        print(f"LLM runs with LLM: {self.envs.envs[0].runs_with_llm}")
+                        print(
+                            f"LLM runs without LLM: {self.envs.envs[0].runs_without_llm}"
+                        )
+                        print(
+                            f"LLM use rate: {self.envs.envs[0].runs_with_llm / (self.envs.envs[0].runs_with_llm + self.envs.envs[0].runs_without_llm)}"
+                        )
                     self.scores = []
 
                 train_infos["average_step_rewards"] = np.mean(self.buffer.rewards)
 
                 self.log_train(train_infos, self.true_total_num_steps)
-            print("Done logging")
-            # --- Debug: current game state, legal moves, observations (for first env thread) ---
-            tid = 0
-            print(
-                "[Debug] Observations (thread {}): shape obs={}, share_obs={}".format(
-                    tid, self.use_obs.shape, self.use_share_obs.shape
-                )
-            )
-            print("  obs[{}] (first 20): {}".format(tid, self.use_obs[tid][:20]))
-            print(
-                "  share_obs[{}] (first 20): {}".format(
-                    tid, self.use_share_obs[tid][:20]
-                )
-            )
-            legal_uids = np.where(self.use_available_actions[tid] == 1.0)[0]
-            print(
-                "[Debug] Legal moves (thread {}): {} actions -> UIDs {}".format(
-                    tid, len(legal_uids), legal_uids.tolist()
-                )
-            )
-            # Human-readable game state only when envs are in-process (ChooseDummyVecEnv)
-            if hasattr(self.envs, "envs") and len(self.envs.envs) > 0:
-                try:
-                    llm_ctx = self.envs.envs[tid].get_llm_context()
-                    if llm_ctx is not None:
-                        text_obs, legal_moves_dicts, legal_move_uids, game_info = (
-                            llm_ctx
-                        )
-                        print("[Debug] Game state (text):\n{}".format(text_obs))
-                        print(
-                            "[Debug] Game info: fireworks={} info_tokens={} life_tokens={} deck_size={}".format(
-                                game_info.get("fireworks"),
-                                game_info.get("information_tokens"),
-                                game_info.get("life_tokens"),
-                                game_info.get("deck_size"),
-                            )
-                        )
-                        print(
-                            "[Debug] Legal moves (human): {}".format(legal_moves_dicts)
-                        )
-                    else:
-                        print(
-                            "[Debug] Game state: get_llm_context() returned None (e.g. chance player)"
-                        )
-                except Exception as e:
-                    print(
-                        "[Debug] Game state: could not get ({}). Use DummyVecEnv for in-process state.".format(
-                            e
-                        )
-                    )
-            else:
-                print(
-                    "[Debug] Game state: use ChooseDummyVecEnv (n_rollout_threads=1) to print human-readable state."
-                )
+            # print("Done logging")
             # eval
             if episode % self.eval_interval == 0 and self.use_eval:
                 self.eval(self.true_total_num_steps)
+        print(
+            f"\n[FINISHED] Training complete! Saving final model at update {self.true_total_updates}..."
+        )
+        self.save(update_num=self.true_total_updates, final=True)
+        print(f"[SUCCESS] Final model saved at update {self.true_total_updates}.")
 
     def warmup(self):
         # reset env
@@ -375,16 +338,16 @@ class HanabiRunner(Runner):
                         )
                     self._llm_diagnostic_calls = 0
             self.true_total_num_steps += (choose == True).sum()
-            if self._next_step_checkpoint is not None:
-                while self.true_total_num_steps >= self._next_step_checkpoint:
-                    self.save(tag="step_{}".format(self._next_step_checkpoint))
-                    print(
-                        "Saved step checkpoint at {} env steps.".format(
-                            self._next_step_checkpoint
-                        ),
-                        flush=True,
-                    )
-                    self._next_step_checkpoint += self._save_interval_steps
+            # if self._next_step_checkpoint is not None:
+            #     while self.true_total_num_steps >= self._next_step_checkpoint:
+            #         self.save(tag="step_{}".format(self._next_step_checkpoint))
+            #         print(
+            #             "Saved step checkpoint at {} env steps.".format(
+            #                 self._next_step_checkpoint
+            #             ),
+            #             flush=True,
+            #         )
+            #         self._next_step_checkpoint += self._save_interval_steps
             share_obs = share_obs if self.use_centralized_V else obs
 
             # truly used value
@@ -552,14 +515,22 @@ class HanabiRunner(Runner):
                             eval_scores.append(eval_info["score"])
 
         eval_average_score = np.mean(eval_scores)
+        eval_max_score = np.max(eval_scores) if len(eval_scores) > 0 else 0.0
+
         print("eval average score is {}.".format(eval_average_score))
+        print("eval MAX score is {}.".format(eval_max_score))
+
         if self.use_wandb:
-            wandb.log({"eval_average_score": eval_average_score}, step=total_num_steps)
+            wandb.log(
+                {
+                    "eval_average_score": eval_average_score,
+                    "eval_max_score": eval_max_score,  # Log it to WandB!
+                }
+            )
         else:
             self.writter.add_scalars(
-                "eval_average_score",
-                {"eval_average_score": eval_average_score},
-                total_num_steps,
+                "eval_scores",
+                {"average": eval_average_score, "max": eval_max_score},
             )
 
     @torch.no_grad()
@@ -569,7 +540,9 @@ class HanabiRunner(Runner):
 
         eval_scores = []
         for trial in range(trials):
-            print("trail is {}".format(trial))
+            print("\n" + "=" * 60)
+            print(f"  >>> STARTING EVALUATION GAME {trial + 1} <<<")
+            print("=" * 60 + "\n")
             eval_finish = False
             eval_reset_choose = np.ones(self.n_eval_rollout_threads) == 1.0
 
@@ -632,5 +605,81 @@ class HanabiRunner(Runner):
                         if eval_done:
                             if "score" in eval_info.keys():
                                 eval_scores.append(eval_info["score"])
+                                print(
+                                    f"Game {len(eval_scores)} finished! Score: {eval_info['score']}",
+                                    flush=True,
+                                )
+
+                                # --- Debug: current game state, legal moves, observations (for first env thread) ---
+                    # tid = 0
+                    # CHANGE 1: Use eval_obs and eval_share_obs (local variables)
+                    # print(
+                    #     "[Debug] Observations (thread {}): shape obs={}, share_obs={}".format(
+                    #         tid, eval_obs.shape, eval_share_obs.shape
+                    #     )
+                    # )
+                    # print("  obs[{}] (first 20): {}".format(tid, eval_obs[tid][:20]))
+                    # print(
+                    #     "  share_obs[{}] (first 20): {}".format(
+                    #         tid, eval_share_obs[tid][:20]
+                    #     )
+                    # )
+
+                    # CHANGE 2: Use eval_available_actions
+                    # legal_uids = np.where(eval_available_actions[tid] == 1.0)[0]
+                    # print(
+                    #     "[Debug] Legal moves (thread {}): {} actions -> UIDs {}".format(
+                    #         tid, len(legal_uids), legal_uids.tolist()
+                    #     )
+                    # )
+
+                    # CHANGE 3: Check eval_envs (the local evaluation environments)
+                    # if hasattr(eval_envs, "envs") and len(eval_envs.envs) > 0:
+                    #     try:
+                    #         # This calls the text extraction logic you need for your LLM research
+                    #         llm_ctx = eval_envs.envs[tid].get_llm_context()
+                    #         if llm_ctx is not None:
+                    #             (
+                    #                 text_obs,
+                    #                 legal_moves_dicts,
+                    #                 legal_move_uids,
+                    #                 game_info,
+                    #             ) = llm_ctx
+                    #             print("[Debug] Game state (text):\n{}".format(text_obs))
+                    #             print(
+                    #                 "[Debug] Game info: fireworks={} info_tokens={} life_tokens={} deck_size={}".format(
+                    #                     game_info.get("fireworks"),
+                    #                     game_info.get("information_tokens"),
+                    #                     game_info.get("life_tokens"),
+                    #                     game_info.get("deck_size"),
+                    #                 )
+                    #             )
+                    #             print(
+                    #                 "[Debug] Legal moves (human): {}".format(
+                    #                     legal_moves_dicts
+                    #                 )
+                    #             )
+                    #         else:
+                    #             print(
+                    #                 "[Debug] Game state: get_llm_context() returned None (e.g. chance player)"
+                    #             )
+                    #     except Exception as e:
+                    #         print(
+                    #             "[Debug] Game state: could not get ({}). Use DummyVecEnv for in-process state.".format(
+                    #                 e
+                    #             )
+                    #         )
+                    # else:
+                    #     print(
+                    #         "[Debug] Game state: use ChooseDummyVecEnv (n_rollout_threads=1) to print human-readable state."
+                    #     )
 
         eval_average_score = np.mean(eval_scores)
+        print("eval average score is {}.".format(eval_average_score))
+        if self.use_wandb:
+            wandb.log({"eval_average_score": eval_average_score})
+        else:
+            self.writter.add_scalars(
+                "eval_average_score",
+                {"eval_average_score": eval_average_score},
+            )

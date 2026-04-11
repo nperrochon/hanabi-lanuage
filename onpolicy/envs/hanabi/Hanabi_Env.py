@@ -181,6 +181,8 @@ class HanabiEnv(Environment):
         if self.llm_step_prob < 1.0:
             print(f"LLM step probability: {self.llm_step_prob}")
 
+        self.verbose = args.verbose
+
         self.runs_with_llm = 0
         self.runs_without_llm = 0
 
@@ -568,6 +570,13 @@ class HanabiEnv(Environment):
         Raises:
           AssertionError: When an illegal action is provided.
         """
+        cur_p = self.state.cur_player()
+        if self.verbose:
+            print(f"\n[TURN] Player {cur_p} | Absolute Truth:\n{self.state}")
+            print(
+                f"[VIEW] Player {cur_p} sees:\n{self.state.observation(cur_p).text_observation()}"
+            )
+
         action = int(action[0])
         if isinstance(action, dict):
             # Convert dict action HanabiMove
@@ -593,12 +602,14 @@ class HanabiEnv(Environment):
         else:
             raise ValueError("Expected action as dict or int, got: {}".format(action))
 
+        if self.verbose:
+            print(f"[MOVE] Chosen Action: {action}")
         last_score = self.state.score()
         # Apply the action to the state.
-        print("Game state before action:", self.state)
-        print("Taking action", action)
+        # print("Game state before action:", self.state)
+        # print("Taking action", action)
         self.state.apply_move(action)
-        print("Game state after action:", self.state)
+        # print("Game state after action:", self.state)
 
         # with open("hanabi_debug.log", "a") as f:
         #     print("Game state before action:", self.state, file=f, flush=True)
@@ -609,6 +620,10 @@ class HanabiEnv(Environment):
         while self.state.cur_player() == pyhanabi.CHANCE_PLAYER_ID:
             self.state.deal_random_card()
 
+        if self.verbose:
+            print(
+                f"[NEW STATE] Fireworks: {self.state.fireworks()} | Tokens: {self.state.information_tokens()}I/{self.state.life_tokens()}L"
+            )
         observation = self._make_observation_all_players()
         current_player = self.state.cur_player()
         player_observations = observation["player_observations"]

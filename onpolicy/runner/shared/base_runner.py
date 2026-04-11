@@ -1,3 +1,4 @@
+from turtle import up
 import wandb
 import os
 import numpy as np
@@ -51,6 +52,7 @@ class Runner(object):
         self.use_eval = self.all_args.use_eval
         self.eval_interval = self.all_args.eval_interval
         self.log_interval = self.all_args.log_interval
+        self.save_every_x_updates = self.all_args.save_every_x_updates
 
         # dir
         self.model_dir = self.all_args.model_dir
@@ -140,15 +142,25 @@ class Runner(object):
         self.buffer.after_update()
         return train_infos
 
-    def save(self, episode=0):
+    def save(self, update_num=0, final=False):
         """Save policy's actor and critic networks."""
         policy_actor = self.trainer.policy.actor
         torch.save(
-            policy_actor.state_dict(), str(self.save_dir) + f"/actor_ep{episode}.pt"
+            policy_actor.state_dict(),
+            (
+                str(self.save_dir) + f"/actor_ep{update_num}.pt"
+                if not final
+                else str(self.save_dir) + f"/actor.pt"
+            ),
         )
         policy_critic = self.trainer.policy.critic
         torch.save(
-            policy_critic.state_dict(), str(self.save_dir) + f"/critic_ep{episode}.pt"
+            policy_critic.state_dict(),
+            (
+                str(self.save_dir) + f"/critic_ep{update_num}.pt"
+                if not final
+                else str(self.save_dir) + f"/critic.pt"
+            ),
         )
 
     def restore(self, model_dir):
