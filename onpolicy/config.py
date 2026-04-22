@@ -565,6 +565,23 @@ def get_config():
         help="by default None. set the path to pretrained model.",
     )
 
+    # llm parameters
+    parser.add_argument(
+        "--use_llm",
+        action="store_true",
+        default=False,
+        help="whether to use llm",
+    )
+    parser.add_argument(
+        "--llm_model", type=str, default="qwen2:7b", help="the model to use for llm"
+    )
+    parser.add_argument(
+        "--llm_step_prob",
+        type=float,
+        default=1.0,
+        help="the probability of using llm at each step (default: 1.0)",
+    )
+
     # add for transformer
     parser.add_argument("--encode_state", action="store_true", default=False)
     parser.add_argument("--n_block", type=int, default=1)

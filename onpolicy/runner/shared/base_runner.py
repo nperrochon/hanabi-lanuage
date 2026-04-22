@@ -94,6 +94,44 @@ class Runner(object):
 
         # algorithm
         self.trainer = TrainAlgo(self.all_args, self.policy, device=self.device)
+        # If a full checkpoint was loaded before trainer creation, restore trainer state now
+        if hasattr(self, "_resume_checkpoint"):
+            ckpt = self._resume_checkpoint
+
+            # Policy optimizers
+            if "actor_optimizer_state_dict" in ckpt:
+                if hasattr(self.trainer.policy, "actor_optimizer"):
+                    self.trainer.policy.actor_optimizer.load_state_dict(
+                        ckpt["actor_optimizer_state_dict"]
+                    )
+                elif hasattr(self.trainer, "actor_optimizer"):
+                    self.trainer.actor_optimizer.load_state_dict(
+                        ckpt["actor_optimizer_state_dict"]
+                    )
+                print("Restored actor optimizer state")
+
+            if "critic_optimizer_state_dict" in ckpt:
+                if hasattr(self.trainer.policy, "critic_optimizer"):
+                    self.trainer.policy.critic_optimizer.load_state_dict(
+                        ckpt["critic_optimizer_state_dict"]
+                    )
+                elif hasattr(self.trainer, "critic_optimizer"):
+                    self.trainer.critic_optimizer.load_state_dict(
+                        ckpt["critic_optimizer_state_dict"]
+                    )
+                print("Restored critic optimizer state")
+
+            # Value normalizer / PopArt
+            if "value_normalizer_state_dict" in ckpt:
+                if hasattr(self.trainer, "value_normalizer") and self.trainer.value_normalizer is not None:
+                    if hasattr(self.trainer.value_normalizer, "load_state_dict"):
+                        self.trainer.value_normalizer.load_state_dict(
+                            ckpt["value_normalizer_state_dict"]
+                        )
+                        print("Restored value normalizer state")
+            elif "value_normalizer_obj" in ckpt:
+                self.trainer.value_normalizer = ckpt["value_normalizer_obj"]
+                print("Restored serialized value normalizer object")
 
         # buffer
         self.buffer = SharedReplayBuffer(
@@ -143,45 +181,111 @@ class Runner(object):
         return train_infos
 
     def save(self, update_num=0, final=False):
-        """Save policy's actor and critic networks."""
-        policy_actor = self.trainer.policy.actor
-        torch.save(
-            policy_actor.state_dict(),
-            (
-                str(self.save_dir) + f"/actor_ep{update_num}.pt"
-                if not final
-                else str(self.save_dir) + f"/actor.pt"
-            ),
-        )
-        policy_critic = self.trainer.policy.critic
-        torch.save(
-            policy_critic.state_dict(),
-            (
-                str(self.save_dir) + f"/critic_ep{update_num}.pt"
-                if not final
-                else str(self.save_dir) + f"/critic.pt"
-            ),
+        """Save full training state for real resume."""
+        suffix = "" if final else f"_ep{update_num}"
+        ckpt_path = (
+            os.path.join(self.save_dir, "checkpoint.pt")
+            if final
+            else os.path.join(self.save_dir, f"checkpoint{suffix}.pt")
         )
 
+        checkpoint = {
+            "actor_state_dict": self.trainer.policy.actor.state_dict(),
+            "critic_state_dict": self.trainer.policy.critic.state_dict(),
+        }
+
+        # Optimizers: save if present
+        if hasattr(self.trainer.policy, "actor_optimizer"):
+            checkpoint["actor_optimizer_state_dict"] = (
+                self.trainer.policy.actor_optimizer.state_dict()
+            )
+        if hasattr(self.trainer.policy, "critic_optimizer"):
+            checkpoint["critic_optimizer_state_dict"] = (
+                self.trainer.policy.critic_optimizer.state_dict()
+            )
+
+        # Some codebases keep optimizers on trainer, not policy
+        if hasattr(self.trainer, "actor_optimizer"):
+            checkpoint["actor_optimizer_state_dict"] = (
+                self.trainer.actor_optimizer.state_dict()
+            )
+        if hasattr(self.trainer, "critic_optimizer"):
+            checkpoint["critic_optimizer_state_dict"] = (
+                self.trainer.critic_optimizer.state_dict()
+            )
+
+        # Value normalizer / PopArt
+        if hasattr(self.trainer, "value_normalizer") and self.trainer.value_normalizer is not None:
+            if hasattr(self.trainer.value_normalizer, "state_dict"):
+                checkpoint["value_normalizer_state_dict"] = (
+                    self.trainer.value_normalizer.state_dict()
+                )
+            else:
+                # fallback for custom objects without state_dict
+                checkpoint["value_normalizer_obj"] = self.trainer.value_normalizer
+
+        # Useful metadata
+        checkpoint["all_args"] = vars(self.all_args)
+        checkpoint["hidden_size"] = self.hidden_size
+        checkpoint["recurrent_N"] = self.recurrent_N
+        checkpoint["update_num"] = update_num
+
+        torch.save(checkpoint, ckpt_path)
+        print(f"Saved full checkpoint to {ckpt_path}")
+
+        # Optional: keep old files too for eval compatibility
+        torch.save(
+            self.trainer.policy.actor.state_dict(),
+            os.path.join(self.save_dir, "actor.pt" if final else f"actor_ep{update_num}.pt"),
+        )
+        torch.save(
+            self.trainer.policy.critic.state_dict(),
+            os.path.join(self.save_dir, "critic.pt" if final else f"critic_ep{update_num}.pt"),
+        )
     def restore(self, model_dir):
-        """Restore policy's networks from a saved model."""
-        policy_actor_state_dict = torch.load(str(self.model_dir) + "/actor.pt")
+        """Restore full training state if available; otherwise fall back to actor/critic only."""
+        print(f"Restoring model from {model_dir}")
+
+        checkpoint_path = os.path.join(model_dir, "checkpoint.pt")
+
+        if os.path.exists(checkpoint_path):
+            checkpoint = torch.load(checkpoint_path, map_location=self.device)
+
+            self.policy.actor.load_state_dict(checkpoint["actor_state_dict"])
+            if not self.all_args.use_render:
+                self.policy.critic.load_state_dict(checkpoint["critic_state_dict"])
+
+            print("Loaded actor/critic weights from checkpoint.pt")
+
+            # Do NOT restore optimizers here yet if trainer isn't created
+            # We'll stash them and load after trainer is initialized.
+            self._resume_checkpoint = checkpoint
+            return
+
+        # Fallback: old style actor/critic only
+        actor_path = os.path.join(model_dir, "actor.pt")
+        critic_path = os.path.join(model_dir, "critic.pt")
+
+        policy_actor_state_dict = torch.load(actor_path, map_location=self.device)
         self.policy.actor.load_state_dict(policy_actor_state_dict)
+
         if not self.all_args.use_render:
-            policy_critic_state_dict = torch.load(str(self.model_dir) + "/critic.pt")
+            policy_critic_state_dict = torch.load(critic_path, map_location=self.device)
             self.policy.critic.load_state_dict(policy_critic_state_dict)
 
+        print("Loaded legacy actor.pt / critic.pt only")
+
     def log_train(self, train_infos, total_num_steps):
-        """
-        Log training info.
-        :param train_infos: (dict) information about training update.
-        :param total_num_steps: (int) total number of training env steps.
-        """
-        for k, v in train_infos.items():
-            if self.use_wandb:
-                wandb.log({k: v}, step=total_num_steps)
-            else:
-                self.writter.add_scalars(k, {k: v}, total_num_steps)
+            """
+            Log training info.
+            :param train_infos: (dict) information about training update.
+            :param total_num_steps: (int) total number of training env steps.
+            """
+            for k, v in train_infos.items():
+                if self.use_wandb:
+                    wandb.log({k: v}, step=total_num_steps)
+                else:
+                    self.writter.add_scalars(k, {k: v}, total_num_steps)
 
     def log_env(self, env_infos, total_num_steps):
         """
