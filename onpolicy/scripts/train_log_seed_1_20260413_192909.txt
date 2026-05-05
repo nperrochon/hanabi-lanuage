@@ -1,0 +1,37 @@
+Gym has been unmaintained since 2022 and does not support NumPy 2.0 amongst other critical functionality.
+Please upgrade to Gymnasium, the maintained drop-in replacement of Gym, or contact the authors of your software and request that they upgrade.
+Users of this version of Gym should be able to simply replace 'import gym' with 'import gymnasium as gym' in the vast majority of cases.
+See the migration guide at https://gymnasium.farama.org/introduction/migration_guide/ for additional information.
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+wandb: Currently logged in as: nperroch (nperroch-uci) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: WARNING Using a boolean value for 'reinit' is deprecated. Use 'return_previous' or 'finish_previous' instead.
+wandb: Tracking run with wandb version 0.25.1
+wandb: Run data is saved locally in /data/class/mae93/nperroch/hanabi-lanuage/onpolicy/scripts/results/Hanabi/Hanabi-Full/mappo/check/wandb/run-20260413_192912-9ittmibg
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run mappo_check_seed1
+wandb: ⭐️ View project at https://wandb.ai/nperroch-uci/Hanabi
+wandb: 🚀 View run at https://wandb.ai/nperroch-uci/Hanabi/runs/9ittmibg
+u are choosing to use mappo, we set use_recurrent_policy & use_naive_recurrent_policy to be False
+choose to use cpu...
+use_llm: False
+algorithm_name: mappo
+use_recurrent_policy: False
+use_naive_recurrent_policy: False
+use_popart: True
+use_valuenorm: False
+seed: 1
+n_rollout_threads: 128
+Using ChooseSubprocVecEnv with n_rollout_threads = 128
+Traceback (most recent call last):
+  File "/data/class/mae93/nperroch/hanabi-lanuage/onpolicy/scripts/train/train_hanabi_forward.py", line 270, in <module>
+    main(sys.argv[1:])
+  File "/data/class/mae93/nperroch/hanabi-lanuage/onpolicy/scripts/train/train_hanabi_forward.py", line 254, in main
+    runner = Runner(config)
+  File "/data/class/mae93/nperroch/hanabi-lanuage/onpolicy/runner/shared/hanabi_runner_forward.py", line 20, in __init__
+    super(HanabiRunner, self).__init__(config)
+  File "/data/class/mae93/nperroch/hanabi-lanuage/onpolicy/runner/shared/base_runner.py", line 34, in __init__
+    self.env_name = self.all_args.env_name
+AttributeError: 'dict' object has no attribute 'env_name'
+[1;34mwandb[0m: 
+[1;34mwandb[0m: 🚀 View run [33mmappo_check_seed1[0m at: [34mhttps://wandb.ai/nperroch-uci/Hanabi/runs/9ittmibg[0m
+[1;34mwandb[0m: Find logs at: [1;35mresults/Hanabi/Hanabi-Full/mappo/check/wandb/run-20260413_192912-9ittmibg/logs[0m

@@ -286,7 +286,7 @@ class HanabiOllamaClient:
         cache_key = self._make_cache_key(prompt)
         cached_suggested_uid = self._cache_get(cache_key)
 
-        if cached_suggested_uid is not HanabiOllamaClient..CACHE_MISS:
+        if cached_suggested_uid is not HanabiOllamaClient.CACHE_MISS:
             return cached_suggested_uid, llm_context_to_action_vector(
                 num_moves,
                 cached_suggested_uid,
