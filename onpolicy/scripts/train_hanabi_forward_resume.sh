@@ -5,7 +5,7 @@
 #SBATCH --partition=ava_f.p
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16
-#SBATCH --mem=64G
+#SBATCH --mem=32G
 #SBATCH --time=24:00:00
 #SBATCH --gres=gpu:1
 
@@ -20,8 +20,11 @@ model_dir="/home/nperroch/hanabi-lanuage/onpolicy/scripts/results/Hanabi/Hanabi-
 model_dir_epoch_10="/home/nperroch/hanabi-lanuage/onpolicy/scripts/results/Hanabi/Hanabi-Full/mappo/single_run_8threads/wandb/run-20260420_130429-miejs3il/files"
 eval_model_dir="/home/nperroch/hanabi-lanuage/onpolicy/scripts/results/Hanabi/Hanabi-Full/mappo/single_run_8threads/wandb/run-20260421_105027-dqry5qi9/files"
 
+model_dir_deterministic_deal="/home/nperroch/hanabi-lanuage/onpolicy/scripts/results/Hanabi/Hanabi-Full/mappo/single_run_16threads/wandb/run-20260421_215344-epfa1xc7/files"
 model_dir_continued="/home/nperroch/hanabi-lanuage/onpolicy/scripts/results/Hanabi/Hanabi-Full/mappo/single_run_8threads/wandb/run-20260421_105027-dqry5qi9/files"
 model_dir_ppo_10_ent_0015="/home/nperroch/hanabi-lanuage/onpolicy/scripts/results/Hanabi/Hanabi-Full/mappo/single_run_8threads/wandb/run-20260420_125923-66sgqo0l/files"
+model_dir_best_run_8_thread_resumed="/home/nperroch/hanabi-lanuage/onpolicy/scripts/results/Hanabi/Hanabi-Full/mappo/single_run_8threads/wandb/run-20260421_142511-907bqrvl/files"
+model_dir_best_run_16_thread="/home/nperroch/hanabi-lanuage/onpolicy/scripts/results/Hanabi/Hanabi-Full/mappo/single_run_16threads/wandb/run-20260421_145812-zuf0e430/files"
 
 mkdir -p /home/nperroch/hanabi-lanuage/logs
 ulimit -n 22222
@@ -48,16 +51,15 @@ python -u onpolicy/scripts/train/train_hanabi_forward.py \
   --num_mini_batch 1 \
   --episode_length 100 \
   --num_env_steps 1000000000 \
-  --ppo_epoch 10 \
+  --ppo_epoch 6 \
   --gain 0.01 \
   --lr 7e-4 \
   --critic_lr 1e-3 \
   --clip_param 0.1 \
   --hidden_size 512 \
   --layer_N 2 \
-  --entropy_coef 0.015 \
+  --entropy_coef 0.01 \
   --log_interval 5 \
-  --model_dir ${model_dir_ppo_10_ent_0015}
+  --model_dir ${model_dir_best_run_16_thread} \
 
 echo "end time: $(date)"
-

@@ -236,6 +236,12 @@ def get_config():
         default=False,
         help="Whether to use global state or concatenated obs",
     )
+    parser.add_argument(
+        "--deterministic_deal",
+        action="store_true",
+        default=False,
+        help="Deal cards deterministically by rank then color.",
+    )
 
     # replay buffer parameters
     parser.add_argument(

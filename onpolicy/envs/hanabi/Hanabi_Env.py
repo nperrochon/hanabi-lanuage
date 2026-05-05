@@ -128,6 +128,7 @@ class HanabiEnv(Environment):
                 "max_life_tokens": 3,
                 "observation_type": pyhanabi.AgentObservationType.CARD_KNOWLEDGE.value,
                 "seed": self._seed,
+                "deterministic_deal": getattr(args, "deterministic_deal", False),
             }
         # max:action 48 obs=680 min:action=20 obs=433 score=25 use memory
         elif args.hanabi_name == "Hanabi-Full-Minimal":
@@ -139,6 +140,7 @@ class HanabiEnv(Environment):
                 "max_life_tokens": 3,
                 "observation_type": pyhanabi.AgentObservationType.MINIMAL.value,
                 "seed": self._seed,
+                "deterministic_deal": getattr(args, "deterministic_deal", False),
             }
         elif (
             args.hanabi_name == "Hanabi-Small"
@@ -152,6 +154,7 @@ class HanabiEnv(Environment):
                 "max_life_tokens": 1,
                 "observation_type": pyhanabi.AgentObservationType.CARD_KNOWLEDGE.value,
                 "seed": self._seed,
+                "deterministic_deal": getattr(args, "deterministic_deal", False),
             }
         elif (
             args.hanabi_name == "Hanabi-Very-Small"
@@ -165,6 +168,7 @@ class HanabiEnv(Environment):
                 "max_life_tokens": 1,
                 "observation_type": pyhanabi.AgentObservationType.CARD_KNOWLEDGE.value,
                 "seed": self._seed,
+                "deterministic_deal": getattr(args, "deterministic_deal", False),
             }
         else:
             raise ValueError("Unknown environment {}".format(args.hanabi_name))
@@ -666,6 +670,12 @@ class HanabiEnv(Environment):
             infos["llm_runs_without_llm"] = self.runs_without_llm
             infos["llm_use_rate"] = self.runs_with_llm / (
                 self.runs_with_llm + self.runs_without_llm
+            )
+            infos["llm_cache_hits"] = self._llm_client.cache_hits
+            infos["llm_cache_misses"] = self._llm_client.cache_misses
+            total_cache = self._llm_client.cache_hits + self._llm_client.cache_misses
+            infos["llm_cache_hit_rate"] = (
+                self._llm_client.cache_hits / total_cache if total_cache > 0 else 0.0
             )
 
         return obs, share_obs, rewards, done, infos, available_actions

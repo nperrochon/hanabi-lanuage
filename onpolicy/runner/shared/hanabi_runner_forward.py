@@ -218,13 +218,15 @@ class HanabiRunner(Runner):
                         )
 
                     if getattr(self.all_args, "use_llm", False):
-                        print(f"LLM runs with LLM: {self.envs.envs[0].runs_with_llm}")
-                        print(
-                            f"LLM runs without LLM: {self.envs.envs[0].runs_without_llm}"
-                        )
-                        print(
-                            f"LLM use rate: {self.envs.envs[0].runs_with_llm / (self.envs.envs[0].runs_with_llm + self.envs.envs[0].runs_without_llm)}"
-                        )
+                        if hasattr(self.envs, "envs"):  # works for DummyVecEnv
+                            with_llm = self.envs.envs[0].runs_with_llm
+                            without_llm = self.envs.envs[0].runs_without_llm
+                            total = with_llm + without_llm
+                            print(f"LLM runs with LLM: {with_llm}")
+                            print(f"LLM runs without LLM: {without_llm}")
+                            print(f"LLM use rate: {with_llm / total if total > 0 else 0.0}")
+                        else:
+                            print("LLM counters not accessible in SubprocVecEnv (multi-process)")
                     self.scores = []
 
                 train_infos["average_step_rewards"] = np.mean(self.buffer.rewards)

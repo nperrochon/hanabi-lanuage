@@ -697,6 +697,7 @@ class HanabiGame(object):
     "max_life_tokens": 1 <= maximum (and initial) number of life tokens.
     "seed": random number seed. -1 to use system random device to get seed.
     "random_start_player": boolean. If true, start with random player, not 0.
+    "deterministic_deal": boolean. If true, deal lowest rank then color.
     "observation_type": int AgentObservationType.
     """
     if params is None:

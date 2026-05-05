@@ -110,6 +110,7 @@ class HanabiGame {
   int cards_per_color_ = -1;
   int seed_ = -1;
   bool random_start_player_ = false;
+  bool deterministic_deal_ = false;
   AgentObservationType observation_type_ = kCardKnowledge;
   mutable std::mt19937 rng_;
 };

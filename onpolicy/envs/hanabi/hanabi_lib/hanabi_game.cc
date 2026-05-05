@@ -15,6 +15,7 @@
 #include "hanabi_game.h"
 
 #include "util.h"
+#include <iostream>
 
 namespace hanabi_learning_env {
 
@@ -24,6 +25,7 @@ const int kDefaultPlayers = 2;
 const int kInformationTokens = 8;
 const int kLifeTokens = 3;
 const bool kDefaultRandomStart = false;
+const bool kDefaultDeterministicDeal = false;
 }  // namespace
 
 HanabiGame::HanabiGame(
@@ -43,7 +45,10 @@ HanabiGame::HanabiGame(
   seed_ = ParameterValue<int>(params_, "seed", -1);
   random_start_player_ =
       ParameterValue<bool>(params_, "random_start_player", kDefaultRandomStart);
-  observation_type_ = AgentObservationType(ParameterValue<int>(
+  deterministic_deal_ = ParameterValue<bool>(
+      params_, "deterministic_deal", kDefaultDeterministicDeal);
+  std::cout << "deterministic_deal_ = " << deterministic_deal_ << std::endl;
+      observation_type_ = AgentObservationType(ParameterValue<int>(
       params_, "observation_type", AgentObservationType::kCardKnowledge));
   while (seed_ == -1) {
     seed_ = std::random_device()();
@@ -106,6 +111,24 @@ int HanabiGame::GetChanceOutcomeUid(HanabiMove move) const {
 HanabiMove HanabiGame::PickRandomChance(
     const std::pair<std::vector<HanabiMove>, std::vector<double>>&
         chance_outcomes) const {
+  if (deterministic_deal_) {
+    // Deterministic dealing order: lowest rank first, then lowest color.
+    int best_idx = -1;
+    int best_rank = 0;
+    int best_color = 0;
+    for (int idx = 0; idx < chance_outcomes.first.size(); ++idx) {
+      const HanabiMove& move = chance_outcomes.first[idx];
+      if (best_idx < 0 || move.Rank() < best_rank ||
+          (move.Rank() == best_rank && move.Color() < best_color)) {
+        best_idx = idx;
+        best_rank = move.Rank();
+        best_color = move.Color();
+      }
+    }
+    REQUIRE(best_idx >= 0);
+    return chance_outcomes.first[best_idx];
+  }
+
   std::discrete_distribution<std::mt19937::result_type> dist(
       chance_outcomes.second.begin(), chance_outcomes.second.end());
   return chance_outcomes.first[dist(rng_)];
@@ -120,6 +143,7 @@ std::unordered_map<std::string, std::string> HanabiGame::Parameters() const {
           {"max_life_tokens", std::to_string(MaxLifeTokens())},
           {"seed", std::to_string(seed_)},
           {"random_start_player", random_start_player_ ? "true" : "false"},
+          {"deterministic_deal", deterministic_deal_ ? "true" : "false"},
           {"observation_type", std::to_string(observation_type_)}};
 }
 

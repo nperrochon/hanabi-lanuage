@@ -95,7 +95,7 @@ class Runner(object):
         # algorithm
         self.trainer = TrainAlgo(self.all_args, self.policy, device=self.device)
         # If a full checkpoint was loaded before trainer creation, restore trainer state now
-        if hasattr(self, "_resume_checkpoint"):
+        if hasattr(self, "_resume_checkpoint") and not self.use_eval:
             ckpt = self._resume_checkpoint
 
             # Policy optimizers
@@ -242,6 +242,7 @@ class Runner(object):
             self.trainer.policy.critic.state_dict(),
             os.path.join(self.save_dir, "critic.pt" if final else f"critic_ep{update_num}.pt"),
         )
+
     def restore(self, model_dir):
         """Restore full training state if available; otherwise fall back to actor/critic only."""
         print(f"Restoring model from {model_dir}")
@@ -251,14 +252,21 @@ class Runner(object):
         if os.path.exists(checkpoint_path):
             checkpoint = torch.load(checkpoint_path, map_location=self.device)
 
-            self.policy.actor.load_state_dict(checkpoint["actor_state_dict"])
+            actor_missing, actor_unexpected = self.policy.actor.load_state_dict(
+                checkpoint["actor_state_dict"], strict=False
+            )
+            print("Actor missing:", actor_missing)
+            print("Actor unexpected:", actor_unexpected)
+
             if not self.all_args.use_render:
-                self.policy.critic.load_state_dict(checkpoint["critic_state_dict"])
+                critic_missing, critic_unexpected = self.policy.critic.load_state_dict(
+                    checkpoint["critic_state_dict"], strict=False
+                )
+                print("Critic missing:", critic_missing)
+                print("Critic unexpected:", critic_unexpected)
 
             print("Loaded actor/critic weights from checkpoint.pt")
 
-            # Do NOT restore optimizers here yet if trainer isn't created
-            # We'll stash them and load after trainer is initialized.
             self._resume_checkpoint = checkpoint
             return
 
@@ -267,11 +275,19 @@ class Runner(object):
         critic_path = os.path.join(model_dir, "critic.pt")
 
         policy_actor_state_dict = torch.load(actor_path, map_location=self.device)
-        self.policy.actor.load_state_dict(policy_actor_state_dict)
+        actor_missing, actor_unexpected = self.policy.actor.load_state_dict(
+            policy_actor_state_dict, strict=False
+        )
+        print("Actor missing:", actor_missing)
+        print("Actor unexpected:", actor_unexpected)
 
         if not self.all_args.use_render:
             policy_critic_state_dict = torch.load(critic_path, map_location=self.device)
-            self.policy.critic.load_state_dict(policy_critic_state_dict)
+            critic_missing, critic_unexpected = self.policy.critic.load_state_dict(
+                policy_critic_state_dict, strict=False
+            )
+            print("Critic missing:", critic_missing)
+            print("Critic unexpected:", critic_unexpected)
 
         print("Loaded legacy actor.pt / critic.pt only")
 

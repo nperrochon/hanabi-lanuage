@@ -19,6 +19,8 @@ import json
 import re
 import numpy as np
 from typing import Any, Dict, List, Optional, Tuple
+import hashlib
+from collections import OrderedDict
 
 
 def build_hanabi_prompt(
@@ -45,19 +47,10 @@ def build_hanabi_prompt(
     life_tokens = game_info.get("life_tokens", 0)
     deck_size = game_info.get("deck_size", 0)
 
-    prompt_parts = [
+    prompt_parts_long = [
         "You are playing Hanabi, a cooperative card game. You see the following game state.",
         "",
-        "## Game state",
-        text_observation.strip(),
-        "",
-        "## Game summary",
-        "Fireworks: " + str(fireworks),
-        "Information tokens: " + str(info_tokens),
-        "Life tokens: " + str(life_tokens),
-        "Cards left in deck: " + str(deck_size),
-        "",
-        "## Short Hanabi rules",
+                "## Short Hanabi rules",
         "- Cards are played to the fireworks piles in order: rank 1, then 2, then 3, etc. for each color.",
         "- A PLAY move succeeds only if the card is exactly the next rank needed for its color; otherwise you lose a life token.",
         "- If all life tokens are lost the game ends immediately.",
@@ -71,8 +64,34 @@ def build_hanabi_prompt(
         "Otherwise, use REVEAL_COLOR or REVEAL_RANK hints that give new, useful information; avoid repeating hints that your teammate already knows.",
         "Cluing colors can be very helpful: reveal the color of cards that are likely playable now or will be needed soon, rather than giving redundant hints.",
         "",
+        "## Game state",
+        text_observation.strip(),
+        "",
+        "## Game summary",
+        "Fireworks: " + str(fireworks),
+        "Information tokens: " + str(info_tokens),
+        "Life tokens: " + str(life_tokens),
+        "Cards left in deck: " + str(deck_size),
+        "",
         "## Legal moves (choose exactly one)",
     ]
+
+    prompt_parts = [
+        "Role: Hanabi AI (Cooperative). Goal: Maximize score, minimize life loss.",
+        "",
+        "## Rules & Strategy",
+        "- Play sequence: 1-2-3-4-5 per color. Failed PLAY = -1 life. 0 life = Game Over.",
+        "- Hint (Rank/Color) costs 1 info token. Discard adds 1 info token.",
+        "- Priority: 1. PLAY (high confidence) | 2. HINT (new/useful info) | 3. DISCARD.",
+        "- Strategy: Hint cards that are playable soon; avoid redundant info.",
+        "",
+        "## State",
+        text_observation.strip(),
+        f"Fireworks: {fireworks} | Info: {info_tokens} | Lives: {life_tokens} | Deck: {deck_size}",
+        "",
+        "## Select One Legal Move:"
+    ]
+
 
     # Describe each legal move with an index for the model to refer to
     move_descriptions = []
@@ -162,15 +181,17 @@ class HanabiOllamaClient:
 
     Requires Ollama running (ollama serve) and a model pulled (e.g. ollama pull qwen2:7b).
     """
+    CACHE_MISS = object()
 
     def __init__(
         self,
         model_name: str = "qwen2:7b",
         base_url: str = "http://localhost:11434",
-        max_new_tokens: int = 32,
-        temperature: float = 0.3,
-        top_p: float = 0.9,
+        max_new_tokens: int = 4,
+        temperature: float = 0.0,
+        top_p: float = 1.0,
         timeout: float = 60.0,
+        cache_size: int = 50000,
     ):
         self.model_name = model_name
         self.base_url = base_url.rstrip("/")
@@ -178,6 +199,38 @@ class HanabiOllamaClient:
         self.temperature = temperature
         self.top_p = top_p
         self.timeout = timeout
+
+        # LRU cache: prompt/settings hash -> suggested move UID or None
+        self.cache_size = cache_size
+        self._cache = OrderedDict()
+        self.cache_hits = 0
+        self.cache_misses = 0
+
+    def _make_cache_key(self, prompt: str) -> str:
+        payload = {
+            "model": self.model_name,
+            "prompt": prompt,
+            "max_new_tokens": self.max_new_tokens,
+            "temperature": self.temperature,
+            "top_p": self.top_p,
+        }
+        serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+    def _cache_get(self, key: str):
+        if key not in self._cache:
+            self.cache_misses += 1
+            return HanabiOllamaClient.CACHE_MISS
+
+        self.cache_hits += 1
+        value = self._cache.pop(key)
+        self._cache[key] = value  # mark as recently used
+        return value
+
+    def _cache_put(self, key: str, value):
+        self._cache[key] = value
+        if len(self._cache) > self.cache_size:
+            self._cache.popitem(last=False)
 
     def verify(self) -> None:
         """Verify Ollama is reachable and the model exists. Call at startup; raises if not ready."""
@@ -219,23 +272,39 @@ class HanabiOllamaClient:
         num_moves: int,
     ) -> Tuple[Optional[int], np.ndarray]:
         text_obs, legal_moves_dicts, legal_move_uids, game_info = llm_context
+
         if not legal_moves_dicts or not legal_move_uids:
             return None, llm_context_to_action_vector(num_moves, None)
-        prompt = build_hanabi_prompt(text_obs, legal_moves_dicts, legal_move_uids, game_info)
-        # print("Prompting LLM")
+
+        prompt = build_hanabi_prompt(
+            text_obs,
+            legal_moves_dicts,
+            legal_move_uids,
+            game_info,
+        )
+
+        cache_key = self._make_cache_key(prompt)
+        cached_suggested_uid = self._cache_get(cache_key)
+
+        if cached_suggested_uid is not HanabiOllamaClient..CACHE_MISS:
+            return cached_suggested_uid, llm_context_to_action_vector(
+                num_moves,
+                cached_suggested_uid,
+            )
+
+        # Important: cache miss is the only place Ollama is called.
         response = self._generate(prompt)
-        #print("Response: ", response)
 
         num_legal = len(legal_move_uids)
         idx = parse_llm_action_response(response, num_legal)
-        #print("Parsed index: ", idx)
+
         if idx is not None:
             suggested_uid = legal_move_uids[idx]
-            # print("Game state: ", text_obs)
-            # print("Game info: ", game_info)
-            # print("Chosen move:", legal_moves_dicts[idx])
         else:
             suggested_uid = None
+
+        self._cache_put(cache_key, suggested_uid)
+
         return suggested_uid, llm_context_to_action_vector(num_moves, suggested_uid)
 
     def _generate(self, prompt: str) -> str:
@@ -247,6 +316,7 @@ class HanabiOllamaClient:
             "model": self.model_name,
             "prompt": prompt,
             "stream": False,
+            "keep_alive": "72h",
             "options": {
                 "num_predict": self.max_new_tokens,
                 "temperature": self.temperature,
