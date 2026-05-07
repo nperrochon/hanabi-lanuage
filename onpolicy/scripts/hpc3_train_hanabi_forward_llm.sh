@@ -9,6 +9,7 @@
 #SBATCH --time=3-00:00:00
 #SBATCH --gres=gpu:1
 
+# --- Variables ---
 env="Hanabi"
 hanabi="Hanabi-Full"
 num_agents=2
@@ -18,41 +19,51 @@ llm_model="qwen2:7b"
 exp="single_run_${rollout_threads}threads_${llm_model}"
 seed=1
 
-model_dir="/home/nperroch/hanabi-lanuage/onpolicy/scripts/results/Hanabi/Hanabi-Full/mappo/single_run_8threads/wandb/run-20260420_202622-o2kis2qu/files"
-model_dir_epoch_10="/home/nperroch/hanabi-lanuage/onpolicy/scripts/results/Hanabi/Hanabi-Full/mappo/single_run_8threads/wandb/run-20260420_130429-miejs3il/files"
-eval_model_dir="/home/nperroch/hanabi-lanuage/onpolicy/scripts/results/Hanabi/Hanabi-Full/mappo/single_run_8threads/wandb/run-20260421_105027-dqry5qi9/files"
+REPO="/data/class/mae93/nperroch/hanabi-lanuage"
+LOG_DIR="${REPO}/logs"
 
-model_dir_continued="/home/nperroch/hanabi-lanuage/onpolicy/scripts/results/Hanabi/Hanabi-Full/mappo/single_run_8threads/wandb/run-20260421_105027-dqry5qi9/files"
-model_dir_ppo_10_ent_0015="/home/nperroch/hanabi-lanuage/onpolicy/scripts/results/Hanabi/Hanabi-Full/mappo/single_run_8threads/wandb/run-20260420_125923-66sgqo0l/files"
-
-mkdir -p /home/nperroch/hanabi-lanuage/logs
+# --- Environment Setup ---
+export PATH="/data/class/mae93/nperroch/ollama-install/bin:$PATH"
+export OLLAMA_MODELS="/data/class/mae93/nperroch/ollama_models"
+export OLLAMA_HOST="127.0.0.1:11434"
 ulimit -n 22222
 
-echo "env=${env}"
-echo "algo=${algo}"
-echo "exp=${exp}"
-echo "seed=${seed}"
-echo "SLURM_CPUS_PER_TASK=${SLURM_CPUS_PER_TASK}"
-echo "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}"
-echo "start time: $(date)"
+mkdir -p "$LOG_DIR"
+mkdir -p "$OLLAMA_MODELS"
+cd "$REPO" || exit 1
 
-cd ~/hanabi-lanuage || exit 1
+# --- Start Ollama Server ---
+echo "Starting Ollama server..."
+ollama serve > "${LOG_DIR}/ollama_${SLURM_JOB_ID}.log" 2>&1 &
+OLLAMA_PID=$!
 
-ollama serve > /home/nperroch/hanabi-lanuage/logs/ollama_${SLURM_JOB_ID}.log 2>&1 &
-sleep 10
+# Ensure Ollama dies when the job ends
+cleanup() {
+  echo "Cleaning up Ollama server (PID: ${OLLAMA_PID})..."
+  kill "${OLLAMA_PID}" 2>/dev/null || true
+}
+trap cleanup EXIT
 
-ollama pull qwen2:7b
-ollama pull qwen2.5:3b
-ollama pull qwen2.5:1.5b
-ollama pull llama3.2:3b
-ollama pull phi3:mini
-ollama pull gemma3:4b
+# Wait for Ollama to be responsive
+echo "Waiting for Ollama server to respond..."
+for i in {1..60}; do
+  if ollama list >/dev/null 2>&1; then
+    echo "Ollama is ready after $i iterations"
+    break
+  fi
+  sleep 2
+done
 
-sleep 10
-echo "warming up model..."
-ollama run ${llm_model} "Say 1" > /dev/null
-ollama list
+# --- Prepare Model ---
+echo "Pulling model ${llm_model}..."
+ollama pull "${llm_model}"
 
+echo "Warming up model (loading into VRAM)..."
+# This ensures the model is loaded before Python starts 8 concurrent workers
+ollama run "${llm_model}" "Say 1" > /dev/null
+
+# --- Run Training ---
+echo "Starting Python training at: $(date)"
 python -u onpolicy/scripts/train/train_hanabi_forward.py \
   --env_name ${env} \
   --algorithm_name ${algo} \
@@ -76,8 +87,6 @@ python -u onpolicy/scripts/train/train_hanabi_forward.py \
   --log_interval 5 \
   --use_llm \
   --llm_model ${llm_model} \
-  --llm_step_prob 0.02 \
+  --llm_step_prob 0.02
 
-
-echo "end time: $(date)"
-
+echo "Job ended at: $(date)"

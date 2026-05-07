@@ -213,9 +213,13 @@ class HanabiEnv(Environment):
         self._llm_nonzero_count = 0
         self._llm_total_count = 0
         if self.use_llm:
+            import time
+            import random
             from onpolicy.envs.hanabi.llm_action_helper import HanabiOllamaClient
 
             self._llm_client = HanabiOllamaClient(model_name=self.llm_model)
+            # sleep for a random time to avoid race condition
+            time.sleep(random.uniform(0, 10))
             self._llm_client.verify()  # fail at startup if Ollama/model not ready
 
     def seed(self, seed=None):
@@ -249,7 +253,8 @@ class HanabiEnv(Environment):
             [llm_vector, np.asarray([used_flag], dtype=np.float32)],
             axis=0,
         )
-        obs = np.concatenate([np.asarray(obs, dtype=np.float32), extra], axis=-1)
+        obs = np.concatenate(
+            [np.asarray(obs, dtype=np.float32), extra], axis=-1)
         share_obs = np.concatenate(
             [np.asarray(share_obs, dtype=np.float32), extra], axis=-1
         )
@@ -389,8 +394,10 @@ class HanabiEnv(Environment):
                 )
             obs, share_obs = self._append_llm_vector(obs, share_obs)
         else:
-            base_obs_dim = self.vectorized_observation_shape()[0] + self.players
-            base_share_dim = self.vectorized_share_observation_shape()[0] + self.players
+            base_obs_dim = self.vectorized_observation_shape()[
+                0] + self.players
+            base_share_dim = self.vectorized_share_observation_shape()[
+                0] + self.players
             if self.use_llm:
                 base_obs_dim += self.num_moves() + 1
                 base_share_dim += self.num_moves() + 1
@@ -448,6 +455,7 @@ class HanabiEnv(Environment):
                 return None
             obs = self.state.observation(cur_player)
             text_obs = obs.text_observation()
+            condensed_obs = obs.condensed_obs()
             legal_moves = obs.legal_moves()
             legal_moves_dicts = [m.to_dict() for m in legal_moves]
             legal_move_uids = [self.game.get_move_uid(m) for m in legal_moves]
@@ -461,7 +469,7 @@ class HanabiEnv(Environment):
                 "life_tokens": self.state.life_tokens(),
                 "deck_size": self.state.deck_size(),
             }
-            return (text_obs, legal_moves_dicts, legal_move_uids, game_info)
+            return (text_obs, condensed_obs, legal_moves_dicts, legal_move_uids, game_info)
         except Exception as e:
             print(e)
             return None
@@ -587,7 +595,8 @@ class HanabiEnv(Environment):
             action = self._build_move(action)
         elif isinstance(action, int):
             if action == -1:  # invalid action
-                base_obs_dim = self.vectorized_observation_shape()[0] + self.players
+                base_obs_dim = self.vectorized_observation_shape()[
+                    0] + self.players
                 base_share_dim = (
                     self.vectorized_share_observation_shape()[0] + self.players
                 )
@@ -604,7 +613,8 @@ class HanabiEnv(Environment):
             # Convert int action into a Hanabi move.
             action = self.game.get_move(action)
         else:
-            raise ValueError("Expected action as dict or int, got: {}".format(action))
+            raise ValueError(
+                "Expected action as dict or int, got: {}".format(action))
 
         if self.verbose:
             print(f"[MOVE] Chosen Action: {action}")
@@ -783,7 +793,8 @@ class HanabiEnv(Environment):
         Raises:
           ValueError: Unknown action type.
         """
-        assert isinstance(action, dict), "Expected dict, got: {}".format(action)
+        assert isinstance(
+            action, dict), "Expected dict, got: {}".format(action)
         assert "action_type" in action, (
             "Action should contain `action_type`. " "action: {}"
         ).format(action)

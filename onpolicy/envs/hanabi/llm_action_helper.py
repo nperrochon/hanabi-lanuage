@@ -50,7 +50,7 @@ def build_hanabi_prompt(
     prompt_parts_long = [
         "You are playing Hanabi, a cooperative card game. You see the following game state.",
         "",
-                "## Short Hanabi rules",
+        "## Short Hanabi rules",
         "- Cards are played to the fireworks piles in order: rank 1, then 2, then 3, etc. for each color.",
         "- A PLAY move succeeds only if the card is exactly the next rank needed for its color; otherwise you lose a life token.",
         "- If all life tokens are lost the game ends immediately.",
@@ -76,7 +76,7 @@ def build_hanabi_prompt(
         "## Legal moves (choose exactly one)",
     ]
 
-    prompt_parts = [
+    prompt_parts_short = [
         "Role: Hanabi AI (Cooperative). Goal: Maximize score, minimize life loss.",
         "",
         "## Rules & Strategy",
@@ -84,6 +84,8 @@ def build_hanabi_prompt(
         "- Hint (Rank/Color) costs 1 info token. Discard adds 1 info token.",
         "- Priority: 1. PLAY (high confidence) | 2. HINT (new/useful info) | 3. DISCARD.",
         "- Strategy: Hint cards that are playable soon; avoid redundant info.",
+        "## State Key",
+        "Format: [PlausibleColors : PlausibleRanks]. Example: [RY:1] means card is Red or Yellow, and definitely Rank 1.",
         "",
         "## State",
         text_observation.strip(),
@@ -92,19 +94,60 @@ def build_hanabi_prompt(
         "## Select One Legal Move:"
     ]
 
+    prompt_parts = [
+        "You are playing Hanabi, a cooperative card game. You see the following game state.",
+        "",
+        "## State Legend",
+        "Format: [PlausibleColors : PlausibleRanks].",
+        "Example: [RG:12] means the card is Red or Green, and Rank 1 or 2.",
+        "Example: [B:3] means the card is definitely Blue Rank 3.",
+        "",
+        "## Short Hanabi rules",
+        # ... (keep existing rules)
+        "",
+        "## Short Hanabi rules",
+        "- Cards are played to the fireworks piles in order: rank 1, then 2, then 3, etc. for each color.",
+        "- A PLAY move succeeds only if the card is exactly the next rank needed for its color; otherwise you lose a life token.",
+        "- If all life tokens are lost the game ends immediately.",
+        "- REVEAL_COLOR and REVEAL_RANK consume an information token; you cannot hint if there are zero information tokens.",
+        "- A good hint makes it easier for your teammate to know which card is safely playable soon, or which card is definitely not useful (can be discarded).",
+        "- DISCARD returns one information token but permanently removes that card from the game.",
+        "",
+        "## Strategy reminder",
+        "Your goal is to maximize the final fireworks score and avoid losing life tokens.",
+        "Prefer PLAY when you can infer with high confidence that a card is safely playable (the next needed rank for its color).",
+        "Otherwise, use REVEAL_COLOR or REVEAL_RANK hints that give new, useful information; avoid repeating hints that your teammate already knows.",
+        "Cluing colors can be very helpful: reveal the color of cards that are likely playable now or will be needed soon, rather than giving redundant hints.",
+        "## Game summary",
+        "Fireworks: " + str(fireworks),
+        "Information tokens: " + str(info_tokens),
+        "Life tokens: " + str(life_tokens),
+        "",
+        "## Game state",
+        text_observation.strip(),
+        "",
+
+        "## Legal moves (choose exactly one)",
+    ]
 
     # Describe each legal move with an index for the model to refer to
     move_descriptions = []
     for i, move_dict in enumerate(legal_moves_dicts[:num_legal_descriptions]):
         at = move_dict.get("action_type", "")
         if at == "PLAY":
-            move_descriptions.append("  {}: PLAY card at hand index {}".format(i, move_dict.get("card_index", "?")))
+            move_descriptions.append("  {}: PLAY card at hand index {}".format(
+                i, move_dict.get("card_index", "?")))
         elif at == "DISCARD":
-            move_descriptions.append("  {}: DISCARD card at hand index {}".format(i, move_dict.get("card_index", "?")))
+            move_descriptions.append("  {}: DISCARD card at hand index {}".format(
+                i, move_dict.get("card_index", "?")))
         elif at == "REVEAL_COLOR":
             move_descriptions.append("  {}: REVEAL_COLOR {} to teammate (offset {})".format(
                 i, move_dict.get("color", "?"), move_dict.get("target_offset", "?")))
         elif at == "REVEAL_RANK":
+            # Convert 0-based rank to 1-based for the LLM's natural language
+            rank_val = move_dict.get("rank", "?")
+            if isinstance(rank_val, int):
+                rank_val += 1
             move_descriptions.append("  {}: REVEAL_RANK {} to teammate (offset {})".format(
                 i, move_dict.get("rank", "?"), move_dict.get("target_offset", "?")))
         else:
@@ -233,9 +276,10 @@ class HanabiOllamaClient:
             self._cache.popitem(last=False)
 
     def verify(self) -> None:
-        """Verify Ollama is reachable and the model exists. Call at startup; raises if not ready."""
+        """Verify Ollama is reachable and the model exists with robust retries."""
         from urllib.request import Request, urlopen
         from urllib.error import URLError, HTTPError
+        import time
 
         url = "{}/api/generate".format(self.base_url)
         payload = {
@@ -245,39 +289,37 @@ class HanabiOllamaClient:
             "options": {"num_predict": 1},
         }
         body = json.dumps(payload).encode("utf-8")
-        req = Request(url, data=body, method="POST")
-        req.add_header("Content-Type", "application/json")
-        try:
-            with urlopen(req, timeout=min(10.0, self.timeout)) as resp:
-                json.loads(resp.read().decode("utf-8"))
-        except HTTPError as e:
-            if e.code == 404:
-                hint = "Use an Ollama tag, not a HuggingFace ID. " if ("/" in self.model_name or self.model_name != self.model_name.lower()) else ""
-                raise RuntimeError(
-                    "Ollama model '{}' not found. {}".format(
-                        self.model_name, hint
-                    )
-                ) from e
-            raise RuntimeError(
-                "Ollama request failed (HTTP {}). Is Ollama running? Try: ollama serve".format(e.code)
-            ) from e
-        except URLError as e:
-            raise RuntimeError(
-                "Cannot reach Ollama at {}. Is it running? Try: ollama serve".format(self.base_url)
-            ) from e
+
+        # Robust retry loop
+        max_retries = 10
+        for attempt in range(max_retries):
+            try:
+                req = Request(url, data=body, method="POST")
+                req.add_header("Content-Type", "application/json")
+                # High timeout for cluster environments
+                with urlopen(req, timeout=60.0) as resp:
+                    json.loads(resp.read().decode("utf-8"))
+                    return # Success!
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    wait = (attempt + 1) * 5
+                    print(f"Ollama verify attempt {attempt+1} failed. Retrying in {wait}s... Error: {e}")
+                    time.sleep(wait)
+                else:
+                    raise RuntimeError(f"Could not connect to Ollama after {max_retries} attempts: {e}")
 
     def get_action_from_context(
         self,
         llm_context: Tuple[str, List[Dict], List[int], Dict],
         num_moves: int,
     ) -> Tuple[Optional[int], np.ndarray]:
-        text_obs, legal_moves_dicts, legal_move_uids, game_info = llm_context
+        text_obs, condensed_obs, legal_moves_dicts, legal_move_uids, game_info = llm_context
 
         if not legal_moves_dicts or not legal_move_uids:
             return None, llm_context_to_action_vector(num_moves, None)
 
         prompt = build_hanabi_prompt(
-            text_obs,
+            condensed_obs,
             legal_moves_dicts,
             legal_move_uids,
             game_info,
@@ -342,6 +384,7 @@ class HanabiOllamaClient:
             return ""  # e.g. connection refused when Ollama not running
         return data.get("response", "").strip()
 
+
 def get_llm_obs_vector(
     llm_context: Optional[Tuple],
     num_moves: int,
@@ -360,7 +403,8 @@ def get_llm_obs_vector(
         np.ndarray of shape (num_moves,) and dtype np.float32.
     """
     if llm_context is None:
-        raise ValueError("llm_context is required when using get_llm_obs_vector")
+        raise ValueError(
+            "llm_context is required when using get_llm_obs_vector")
     if client is None:
         raise TypeError("client is required when llm_context is not None")
     _, vector = client.get_action_from_context(llm_context, num_moves)
