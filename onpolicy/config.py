@@ -587,6 +587,21 @@ def get_config():
         default=1.0,
         help="the probability of using llm at each step (default: 1.0)",
     )
+    parser.add_argument(
+        "--llm_vector_mode", type=str, default="softmax", choices=["one_hot", "softmax"]
+    )
+    parser.add_argument(
+        "--llm_backend", type=str, default="vllm", choices=["ollama", "vllm"]
+    )
+    parser.add_argument("--llm_base_url", type=str, default="http://127.0.0.1:8000/v1")
+
+    parser.add_argument("--llm_debug", action="store_true")
+    parser.add_argument(
+        "--max_llm_debug_steps",
+        type=int,
+        default=50,
+        help="the maximum number of steps to debug llm (default: 50)",
+    )
 
     # add for transformer
     parser.add_argument("--encode_state", action="store_true", default=False)

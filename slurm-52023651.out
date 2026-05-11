@@ -1,0 +1,107 @@
+env is Hanabi, algo is mappo, exp is single_run_8threads, max seed is 1
+seed is 1:
+Gym has been unmaintained since 2022 and does not support NumPy 2.0 amongst other critical functionality.
+Please upgrade to Gymnasium, the maintained drop-in replacement of Gym, or contact the authors of your software and request that they upgrade.
+Users of this version of Gym should be able to simply replace 'import gym' with 'import gymnasium as gym' in the vast majority of cases.
+See the migration guide at https://gymnasium.farama.org/introduction/migration_guide/ for additional information.
+deterministic_deal_ = 0
+u are choosing to use mappo, we set use_recurrent_policy & use_naive_recurrent_policy to be False
+choose to use cpu...
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+deterministic_deal_ = 0
+Traceback (most recent call last):
+  File "/data/class/mae93/nperroch/hanabi-lanuage/onpolicy/scripts/eval/eval_hanabi.py", line 219, in <module>
+    main(sys.argv[1:])
+  File "/data/class/mae93/nperroch/hanabi-lanuage/onpolicy/scripts/eval/eval_hanabi.py", line 183, in main
+    eval_envs = make_eval_env(all_args) if all_args.use_eval else None
+  File "/data/class/mae93/nperroch/hanabi-lanuage/onpolicy/scripts/eval/eval_hanabi.py", line 63, in make_eval_env
+    return ChooseSubprocVecEnv(
+  File "/data/class/mae93/nperroch/hanabi-lanuage/onpolicy/envs/env_wrappers.py", line 535, in __init__
+    p.start()
+  File "/data/class/mae93/nperroch/.conda/envs/marl/lib/python3.9/multiprocessing/process.py", line 121, in start
+    self._popen = self._Popen(self)
+  File "/data/class/mae93/nperroch/.conda/envs/marl/lib/python3.9/multiprocessing/context.py", line 224, in _Popen
+    return _default_context.get_context().Process._Popen(process_obj)
+  File "/data/class/mae93/nperroch/.conda/envs/marl/lib/python3.9/multiprocessing/context.py", line 277, in _Popen
+    return Popen(process_obj)
+  File "/data/class/mae93/nperroch/.conda/envs/marl/lib/python3.9/multiprocessing/popen_fork.py", line 19, in __init__
+    self._launch(process_obj)
+  File "/data/class/mae93/nperroch/.conda/envs/marl/lib/python3.9/multiprocessing/popen_fork.py", line 66, in _launch
+    self.pid = os.fork()
+BlockingIOError: [Errno 11] Resource temporarily unavailable
+training is done!

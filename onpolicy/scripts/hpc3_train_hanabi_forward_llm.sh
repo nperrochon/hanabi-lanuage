@@ -22,6 +22,13 @@ seed=1
 REPO="/data/class/mae93/nperroch/hanabi-lanuage"
 LOG_DIR="${REPO}/logs"
 
+conda activate vllm-server
+
+hostname
+nvidia-smi
+
+python -c "import torch; print('CUDA available:', torch.cuda.is_available()); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'no cuda')"
+
 # --- Environment Setup ---
 export PATH="/data/class/mae93/nperroch/ollama-install/bin:$PATH"
 export OLLAMA_MODELS="/data/class/mae93/nperroch/ollama_models"

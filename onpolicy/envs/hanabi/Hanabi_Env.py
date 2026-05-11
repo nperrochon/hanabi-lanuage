@@ -20,7 +20,8 @@ from . import pyhanabi
 from .pyhanabi import color_char_to_idx
 from gym.spaces import Discrete
 import numpy as np
-from onpolicy.envs.hanabi.llm_action_helper import get_llm_obs_vector
+
+# from onpolicy.envs.hanabi.llm_action_helper import get_llm_obs_vector
 
 MOVE_TYPES = [_.name for _ in pyhanabi.HanabiMoveType]
 
@@ -178,7 +179,10 @@ class HanabiEnv(Environment):
         self.game = pyhanabi.HanabiGame(config)
         self.obs_instead_of_state = args.use_obs_instead_of_state
         self.use_llm = getattr(args, "use_llm", False)
+        self.llm_vector_mode = getattr(args, "llm_vector_mode", "softmax")
         self.llm_model = getattr(args, "llm_model", "qwen2:7b")
+        self.llm_backend = getattr(args, "llm_backend", "vllm")
+        self.llm_base_url = getattr(args, "llm_base_url", "http://127.0.0.1:8000/v1")
         self.llm_step_prob = float(
             getattr(args, "llm_step_prob", 1.0)
         )  # 1.0 = every step
@@ -186,6 +190,16 @@ class HanabiEnv(Environment):
             print(f"LLM step probability: {self.llm_step_prob}")
 
         self.verbose = args.verbose
+        self.llm_debug = getattr(args, "llm_debug", False)
+        self._last_llm_debug = None
+        self._debug_step_count = 0
+        self._max_debug_steps = getattr(args, "max_llm_debug_steps", 50)
+
+        print(
+            f"[ENV LLM DEBUG CONFIG] llm_debug={self.llm_debug}, "
+            f"max_llm_debug_steps={self._max_debug_steps}",
+            flush=True,
+        )
 
         self.runs_with_llm = 0
         self.runs_without_llm = 0
@@ -215,12 +229,27 @@ class HanabiEnv(Environment):
         if self.use_llm:
             import time
             import random
-            from onpolicy.envs.hanabi.llm_action_helper import HanabiOllamaClient
+            from onpolicy.envs.hanabi.llm_action_helper import (
+                # HanabiOllamaClient,
+                HanabiVLLMClient,
+            )
 
-            self._llm_client = HanabiOllamaClient(model_name=self.llm_model)
+            if self.llm_backend == "vllm":
+                self._llm_client = HanabiVLLMClient(
+                    model_name=self.llm_model,
+                    base_url=self.llm_base_url,
+                    llm_vector_mode=self.llm_vector_mode,
+                )
+            # elif self.llm_backend == "ollama":
+            #     self._llm_client = HanabiOllamaClient(
+            #         model_name=self.llm_model,
+            #         llm_vector_mode=self.llm_vector_mode,
+            #     )
+            else:
+                raise ValueError(f"Unknown llm_backend: {self.llm_backend}")
             # sleep for a random time to avoid race condition
             time.sleep(random.uniform(0, 10))
-            self._llm_client.verify()  # fail at startup if Ollama/model not ready
+            self._llm_client.verify()  # fail at startup if LLM server/model not ready
 
     def seed(self, seed=None):
         if seed is None:
@@ -232,20 +261,75 @@ class HanabiEnv(Environment):
         if not self.use_llm:
             return obs, share_obs
 
-        used_flag = 0.0  # so policy knows if we used LLM or not
+        used_flag = 0.0
         llm_vector = np.zeros(self.num_moves(), dtype=np.float32)
+
+        # Important: assume no valid debug record unless this call creates one.
+        self._last_llm_debug = None
 
         # Decide whether to call LLM
         if np.random.rand() <= getattr(self, "llm_step_prob", 1.0):
             llm_context = self.get_llm_context()
-            llm_vector = get_llm_obs_vector(
-                llm_context, self.num_moves(), client=self._llm_client
-            )
-            used_flag = 1.0
-            self._llm_total_count += 1
-            if np.any(llm_vector != 0):
-                self._llm_nonzero_count += 1
-            self.runs_with_llm += 1
+
+            if llm_context is not None:
+                (
+                    text_obs,
+                    condensed_obs,
+                    legal_moves_dicts,
+                    legal_move_uids,
+                    game_info,
+                    hint_annotations,
+                ) = llm_context
+
+                suggested_uid, llm_vector, scores_by_legal_idx = (
+                    self._llm_client.get_action_from_context(
+                        llm_context=llm_context,
+                        num_moves=self.num_moves(),
+                        hint_annotations=hint_annotations,
+                    )
+                )
+                used_flag = 1.0
+
+                if self.llm_debug:
+                    (
+                        text_obs,
+                        condensed_obs,
+                        legal_moves_dicts,
+                        legal_move_uids,
+                        game_info,
+                        hint_annotations,
+                    ) = llm_context
+
+                    suggested_legal_idx = None
+                    suggested_move_dict = None
+
+                    if suggested_uid is not None and suggested_uid in legal_move_uids:
+                        suggested_legal_idx = legal_move_uids.index(suggested_uid)
+                        suggested_move_dict = legal_moves_dicts[suggested_legal_idx]
+
+                    self._last_llm_debug = {
+                        "player": self.state.cur_player(),
+                        "text_obs": text_obs,
+                        "condensed_obs": condensed_obs,
+                        "legal_moves_dicts": legal_moves_dicts,
+                        "legal_move_uids": legal_move_uids,
+                        "game_info": game_info,
+                        "suggested_uid": suggested_uid,
+                        "suggested_legal_idx": suggested_legal_idx,
+                        "suggested_move_dict": suggested_move_dict,
+                        "llm_scores_by_legal_idx": scores_by_legal_idx,
+                        "hint_annotations": hint_annotations,
+                    }
+
+                self._llm_total_count += 1
+                if np.any(llm_vector != 0):
+                    self._llm_nonzero_count += 1
+                self.runs_with_llm += 1
+
+            else:
+                # LLM was selected, but no valid context existed.
+                self.runs_without_llm += 1
+
         else:
             self.runs_without_llm += 1
 
@@ -253,11 +337,12 @@ class HanabiEnv(Environment):
             [llm_vector, np.asarray([used_flag], dtype=np.float32)],
             axis=0,
         )
-        obs = np.concatenate(
-            [np.asarray(obs, dtype=np.float32), extra], axis=-1)
+
+        obs = np.concatenate([np.asarray(obs, dtype=np.float32), extra], axis=-1)
         share_obs = np.concatenate(
             [np.asarray(share_obs, dtype=np.float32), extra], axis=-1
         )
+
         return obs, share_obs
 
     def reset(self, choose=True):
@@ -394,10 +479,8 @@ class HanabiEnv(Environment):
                 )
             obs, share_obs = self._append_llm_vector(obs, share_obs)
         else:
-            base_obs_dim = self.vectorized_observation_shape()[
-                0] + self.players
-            base_share_dim = self.vectorized_share_observation_shape()[
-                0] + self.players
+            base_obs_dim = self.vectorized_observation_shape()[0] + self.players
+            base_share_dim = self.vectorized_share_observation_shape()[0] + self.players
             if self.use_llm:
                 base_obs_dim += self.num_moves() + 1
                 base_share_dim += self.num_moves() + 1
@@ -454,7 +537,7 @@ class HanabiEnv(Environment):
             if cur_player == pyhanabi.CHANCE_PLAYER_ID:
                 return None
             obs = self.state.observation(cur_player)
-            text_obs = obs.text_observation()
+            text_obs = self._build_llm_state_text(obs, cur_player)
             condensed_obs = obs.condensed_obs()
             legal_moves = obs.legal_moves()
             legal_moves_dicts = [m.to_dict() for m in legal_moves]
@@ -469,10 +552,166 @@ class HanabiEnv(Environment):
                 "life_tokens": self.state.life_tokens(),
                 "deck_size": self.state.deck_size(),
             }
-            return (text_obs, condensed_obs, legal_moves_dicts, legal_move_uids, game_info)
+            hint_annotations = self._build_hint_annotations(obs, cur_player)
+
+            return (
+                text_obs,
+                condensed_obs,
+                legal_moves_dicts,
+                legal_move_uids,
+                game_info,
+                hint_annotations,
+            )
         except Exception as e:
             print(e)
             return None
+
+    def _format_card_for_llm(self, card):
+        """Format actual visible card identity."""
+        d = card.to_dict()
+        color = d.get("color")
+        rank = d.get("rank", -1)
+
+        if color is None or rank is None or rank < 0:
+            return "hidden"
+
+        # pyhanabi ranks are 0-based, humans use 1-based
+        return f"{color}{rank + 1}"
+
+    def _format_knowledge_for_llm(self, knowledge):
+        """Format what a player knows about one of their own cards."""
+        color = knowledge.color()
+        rank = knowledge.rank()
+
+        color_str = (
+            pyhanabi.color_idx_to_char(color) if color is not None else "unknown color"
+        )
+
+        rank_str = str(rank + 1) if rank is not None and rank >= 0 else "unknown rank"
+
+        return f"{color_str}, {rank_str}"
+
+    def _build_llm_state_text(self, obs, cur_player):
+        """
+        Build state text that separates:
+        1. acting player's own knowledge
+        2. visible teammate actual cards
+        3. teammate's knowledge about their own cards
+        """
+        lines = []
+
+        observed_hands = obs.observed_hands()
+        card_knowledge = obs.card_knowledge()
+
+        lines.append(f"Current acting player: {cur_player}")
+        lines.append("")
+
+        # Offset 0 = current/acting player from this observation's perspective.
+        lines.append("## Acting player's own hand knowledge")
+        for i, knowledge in enumerate(card_knowledge[0]):
+            lines.append(f"  Own card {i}: {self._format_knowledge_for_llm(knowledge)}")
+
+        lines.append("")
+
+        # Other players: visible actual cards + their own knowledge.
+        for offset in range(1, len(observed_hands)):
+            player_id = (cur_player + offset) % self.players
+
+            lines.append(f"## Visible actual hand for player {player_id}")
+            for i, card in enumerate(observed_hands[offset]):
+                lines.append(
+                    f"  Player {player_id} card {i}: {self._format_card_for_llm(card)}"
+                )
+
+            lines.append(f"## Player {player_id}'s knowledge about their own hand")
+            for i, knowledge in enumerate(card_knowledge[offset]):
+                lines.append(
+                    f"  Player {player_id} card {i}: {self._format_knowledge_for_llm(knowledge)}"
+                )
+
+            lines.append("")
+
+        return "\n".join(lines)
+
+    def _build_hint_annotations(self, obs, cur_player):
+        """
+        Returns dict: legal_move_index -> compact hint annotation string.
+
+        Example:
+        6 -> "playable:1, future:0, junk:0"
+        """
+        annotations = {}
+
+        observed_hands = obs.observed_hands()
+        fireworks = self.state.fireworks()
+
+        legal_moves = obs.legal_moves()
+
+        # In 2-player Hanabi, offset 1 is the teammate from current player's perspective.
+        teammate_offset = 1
+        teammate_hand = observed_hands[teammate_offset]
+
+        for legal_idx, move in enumerate(legal_moves):
+            move_dict = move.to_dict()
+            action_type = move_dict.get("action_type")
+
+            if action_type not in ("REVEAL_COLOR", "REVEAL_RANK"):
+                continue
+
+            playable = 0
+            future = 0
+            junk = 0
+
+            touched_cards = []
+
+            for card_idx, card in enumerate(teammate_hand):
+                card_dict = card.to_dict()
+                color = card_dict.get("color")
+                rank0 = card_dict.get("rank")
+
+                if color is None or rank0 is None or rank0 < 0:
+                    continue
+
+                # pyhanabi ranks are 0-based; prompt ranks are 1-based.
+                rank = rank0 + 1
+
+                touches = False
+
+                if action_type == "REVEAL_COLOR":
+                    touches = color == move_dict.get("color")
+
+                elif action_type == "REVEAL_RANK":
+                    # move_dict rank is usually 0-based in pyhanabi.
+                    hint_rank = move_dict.get("rank")
+                    touches = hint_rank is not None and rank0 == hint_rank
+
+                if not touches:
+                    continue
+
+                color_idx = pyhanabi.color_char_to_idx(color)
+                needed_rank = fireworks[color_idx] + 1
+
+                card_name = f"{color}{rank}"
+
+                if rank == needed_rank:
+                    playable += 1
+                    touched_cards.append(f"{card_name}:playable")
+                elif rank > needed_rank:
+                    future += 1
+                    touched_cards.append(f"{card_name}:future")
+                else:
+                    junk += 1
+                    touched_cards.append(f"{card_name}:junk")
+
+            annotation = f"playable:{playable}, future:{future}, junk:{junk}"
+
+            # Optional, slightly more verbose but much more useful:
+            if touched_cards:
+                annotation += " [" + ", ".join(touched_cards) + "]"
+
+            annotations[legal_idx] = annotation
+
+        return annotations
 
     def step(self, action):
         """Take one step in the game.
@@ -589,14 +828,84 @@ class HanabiEnv(Environment):
                 f"[VIEW] Player {cur_p} sees:\n{self.state.observation(cur_p).text_observation()}"
             )
 
-        action = int(action[0])
+        # Convert incoming policy action to an integer UID.
+        raw_action = action
+
+        if isinstance(action, dict):
+            actual_uid = None
+        else:
+            actual_uid = int(np.asarray(action).flatten()[0])
+            action = actual_uid
+
+        if (
+            self.llm_debug
+            and self._last_llm_debug is not None
+            and self._debug_step_count < self._max_debug_steps
+        ):
+            dbg = self._last_llm_debug
+
+            legal_uids = dbg["legal_move_uids"]
+            legal_dicts = dbg["legal_moves_dicts"]
+
+            actual_legal_idx = None
+            actual_move_dict = None
+
+            if actual_uid is not None and actual_uid in legal_uids:
+                actual_legal_idx = legal_uids.index(actual_uid)
+                actual_move_dict = legal_dicts[actual_legal_idx]
+
+            same_as_llm = (
+                dbg["suggested_uid"] is not None
+                and actual_uid is not None
+                and dbg["suggested_uid"] == actual_uid
+            )
+
+            print("\n" + "=" * 100, flush=True)
+            print(f"[LLM DEBUG STEP {self._debug_step_count}]", flush=True)
+            print(f"Current player: {dbg['player']}", flush=True)
+
+            print("\n[GAME SUMMARY]", flush=True)
+            print(dbg["game_info"], flush=True)
+
+            print("\n[GAME STATE / OBSERVATION]", flush=True)
+            print(dbg["condensed_obs"], flush=True)
+
+            print("\n[LEGAL MOVES]", flush=True)
+            for i, (uid, move_dict) in enumerate(zip(legal_uids, legal_dicts)):
+                print(f"  legal_idx={i:02d} | uid={uid:02d} | {move_dict}", flush=True)
+
+            print("\n[LLM SUGGESTION]", flush=True)
+            print(f"  suggested_legal_idx: {dbg['suggested_legal_idx']}", flush=True)
+            print(f"  suggested_uid:       {dbg['suggested_uid']}", flush=True)
+            print(f"  suggested_move:      {dbg['suggested_move_dict']}", flush=True)
+            print("\n[LLM SCORES]", flush=True)
+            for i, move_dict in enumerate(legal_dicts):
+                print(
+                    f"  legal_idx={i:02d} | score={dbg['llm_scores_by_legal_idx'].get(i, 0):+.2f} | {move_dict}",
+                    flush=True,
+                )
+
+            print("\n[ENGINE / POLICY CHOSEN ACTION]", flush=True)
+            print(f"  raw_action:          {raw_action}", flush=True)
+            print(f"  actual_legal_idx:    {actual_legal_idx}", flush=True)
+            print(f"  actual_uid:          {actual_uid}", flush=True)
+            print(f"  actual_move:         {actual_move_dict}", flush=True)
+
+            print("\n[COMPARISON]", flush=True)
+            print(f"  same_as_llm:         {same_as_llm}", flush=True)
+            print("=" * 100 + "\n", flush=True)
+
+            self._debug_step_count += 1
+            self._last_llm_debug = None
+        else:
+            self._last_llm_debug = None
+
         if isinstance(action, dict):
             # Convert dict action HanabiMove
             action = self._build_move(action)
         elif isinstance(action, int):
             if action == -1:  # invalid action
-                base_obs_dim = self.vectorized_observation_shape()[
-                    0] + self.players
+                base_obs_dim = self.vectorized_observation_shape()[0] + self.players
                 base_share_dim = (
                     self.vectorized_share_observation_shape()[0] + self.players
                 )
@@ -613,8 +922,7 @@ class HanabiEnv(Environment):
             # Convert int action into a Hanabi move.
             action = self.game.get_move(action)
         else:
-            raise ValueError(
-                "Expected action as dict or int, got: {}".format(action))
+            raise ValueError("Expected action as dict or int, got: {}".format(action))
 
         if self.verbose:
             print(f"[MOVE] Chosen Action: {action}")
@@ -793,8 +1101,7 @@ class HanabiEnv(Environment):
         Raises:
           ValueError: Unknown action type.
         """
-        assert isinstance(
-            action, dict), "Expected dict, got: {}".format(action)
+        assert isinstance(action, dict), "Expected dict, got: {}".format(action)
         assert "action_type" in action, (
             "Action should contain `action_type`. " "action: {}"
         ).format(action)
