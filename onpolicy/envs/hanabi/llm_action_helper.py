@@ -294,10 +294,10 @@ def parse_llm_action_response(
     for idx in reversed(numbers):
         if 0 <= idx < num_legal:
             return idx
-    print("No valid move found")
-    print("Response: ", response)
-    print("Numbers: ", numbers)
-    print("Num legal: ", num_legal)
+    # print("No valid move found")
+    # print("Response: ", response)
+    # print("Numbers: ", numbers)
+    # print("Num legal: ", num_legal)
     return None
 
 
@@ -882,14 +882,14 @@ class HanabiVLLMClient:
 
         self._cache_put(cache_key, (suggested_uid, llm_vector, scores_by_legal_idx))
 
-        if not hasattr(self, "_debug_score_print_count"):
-            self._debug_score_print_count = 0
+        # if not hasattr(self, "_debug_score_print_count"):
+        #     self._debug_score_print_count = 0
 
-        if self._debug_score_print_count < 30:
-            print("[LLM RAW RESPONSE]", response[:1000], flush=True)
-            print("[LLM PARSED SCORES]", scores_by_legal_idx, flush=True)
-            print("[LLM BEST IDX]", best_idx, "UID:", suggested_uid, flush=True)
-            self._debug_score_print_count += 1
+        # if self._debug_score_print_count < 30:
+        #     print("[LLM RAW RESPONSE]", response[:1000], flush=True)
+        #     print("[LLM PARSED SCORES]", scores_by_legal_idx, flush=True)
+        #     print("[LLM BEST IDX]", best_idx, "UID:", suggested_uid, flush=True)
+        #     self._debug_score_print_count += 1
 
         return suggested_uid, llm_vector, scores_by_legal_idx
 
