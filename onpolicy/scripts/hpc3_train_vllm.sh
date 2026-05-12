@@ -2,7 +2,7 @@
 #SBATCH --job-name=hanabi_mappo
 #SBATCH --output=/data/class/mae93/nperroch/hanabi-lanuage/logs/hanabi_%j.out
 #SBATCH --error=/data/class/mae93/nperroch/hanabi-lanuage/logs/hanabi_%j.err
-#SBATCH -A MAE93_CLASS
+#SBATCH -A royf_lab_gpu
 #SBATCH --partition=gpu
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
