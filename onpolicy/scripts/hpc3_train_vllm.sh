@@ -2,12 +2,12 @@
 #SBATCH --job-name=hanabi_mappo
 #SBATCH --output=/data/class/mae93/nperroch/hanabi-lanuage/logs/hanabi_%j.out
 #SBATCH --error=/data/class/mae93/nperroch/hanabi-lanuage/logs/hanabi_%j.err
-#SBATCH --partition=free-gpu
+#SBATCH --partition=gpu
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --time=3-00:00:00
-#SBATCH --gres=gpu:A100:1
+#SBATCH --gres=gpu:A30:1
 
 # --- Variables ---
 env="Hanabi"
