@@ -7,7 +7,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --time=00:30:00
-#SBATCH --gres=gpu:A30:1
+#SBATCH --gres=gpu:A100:1
 
 # --- Variables ---
 env="Hanabi"
