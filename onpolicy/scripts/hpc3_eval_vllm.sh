@@ -8,7 +8,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --time=00:30:00
-#SBATCH --gres=gpu:A100:1
+#SBATCH --gres=gpu:A30:1
 
 # --- Variables ---
 env="Hanabi"
@@ -17,11 +17,11 @@ num_agents=2
 algo="mappo"
 rollout_threads=8
 eval_rollout_threads=1
-llm_model="Qwen/Qwen2.5-14B-Instruct"
+llm_model="Qwen/Qwen2.5-7B-Instruct"
 exp="single_run_${rollout_threads}threads_${llm_model}"
 # exp="single_run_${rollout_threads}threads_Qwen2p5_1p5B_Instruct_eval"
 seed=1
-model_dir="~/hanabi-lanuage/onpolicy/scripts/results/Hanabi/Hanabi-Full/mappo/single_run_8threads_Qwen/Qwen2.5-14B-Instruct/wandb/latest-run/files"
+model_dir="~/hanabi-lanuage/onpolicy/scripts/results/Hanabi/Hanabi-Full/mappo/single_run_8threads_Qwen/Qwen2.5-7B-Instruct/wandb/latest-run/files"
 
 REPO="/data/class/mae93/nperroch/hanabi-lanuage"
 LOG_DIR="${REPO}/logs/eval_logs"
@@ -51,8 +51,8 @@ export PATH="/data/class/mae93/nperroch/ollama-install/bin:$PATH"
 echo "Starting vLLM server..."
 conda activate vllm-server
 
-MODEL="Qwen/Qwen2.5-14B-Instruct"
-PORT=8002
+MODEL="Qwen/Qwen2.5-7B-Instruct"
+PORT=8001
 
 vllm serve "$MODEL" \
   --host 127.0.0.1 \
