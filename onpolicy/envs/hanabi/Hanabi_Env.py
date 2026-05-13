@@ -860,40 +860,40 @@ class HanabiEnv(Environment):
                 and dbg["suggested_uid"] == actual_uid
             )
 
-            # print("\n" + "=" * 100, flush=True)
-            # print(f"[LLM DEBUG STEP {self._debug_step_count}]", flush=True)
-            # print(f"Current player: {dbg['player']}", flush=True)
+            print("\n" + "=" * 100, flush=True)
+            print(f"[LLM DEBUG STEP {self._debug_step_count}]", flush=True)
+            print(f"Current player: {dbg['player']}", flush=True)
 
-            # print("\n[GAME SUMMARY]", flush=True)
-            # print(dbg["game_info"], flush=True)
+            print("\n[GAME SUMMARY]", flush=True)
+            print(dbg["game_info"], flush=True)
 
-            # print("\n[GAME STATE / OBSERVATION]", flush=True)
-            # print(dbg["condensed_obs"], flush=True)
+            print("\n[GAME STATE / OBSERVATION]", flush=True)
+            print(dbg["condensed_obs"], flush=True)
 
-            # print("\n[LEGAL MOVES]", flush=True)
-            # for i, (uid, move_dict) in enumerate(zip(legal_uids, legal_dicts)):
-            #     print(f"  legal_idx={i:02d} | uid={uid:02d} | {move_dict}", flush=True)
+            print("\n[LEGAL MOVES]", flush=True)
+            for i, (uid, move_dict) in enumerate(zip(legal_uids, legal_dicts)):
+                print(f"  legal_idx={i:02d} | uid={uid:02d} | {move_dict}", flush=True)
 
-            # print("\n[LLM SUGGESTION]", flush=True)
-            # print(f"  suggested_legal_idx: {dbg['suggested_legal_idx']}", flush=True)
-            # print(f"  suggested_uid:       {dbg['suggested_uid']}", flush=True)
-            # print(f"  suggested_move:      {dbg['suggested_move_dict']}", flush=True)
-            # print("\n[LLM SCORES]", flush=True)
-            # for i, move_dict in enumerate(legal_dicts):
-            #     print(
-            #         f"  legal_idx={i:02d} | score={dbg['llm_scores_by_legal_idx'].get(i, 0):+.2f} | {move_dict}",
-            #         flush=True,
-            #     )
+            print("\n[LLM SUGGESTION]", flush=True)
+            print(f"  suggested_legal_idx: {dbg['suggested_legal_idx']}", flush=True)
+            print(f"  suggested_uid:       {dbg['suggested_uid']}", flush=True)
+            print(f"  suggested_move:      {dbg['suggested_move_dict']}", flush=True)
+            print("\n[LLM SCORES]", flush=True)
+            for i, move_dict in enumerate(legal_dicts):
+                print(
+                    f"  legal_idx={i:02d} | score={dbg['llm_scores_by_legal_idx'].get(i, 0):+.2f} | {move_dict}",
+                    flush=True,
+                )
 
-            # print("\n[ENGINE / POLICY CHOSEN ACTION]", flush=True)
-            # print(f"  raw_action:          {raw_action}", flush=True)
-            # print(f"  actual_legal_idx:    {actual_legal_idx}", flush=True)
-            # print(f"  actual_uid:          {actual_uid}", flush=True)
-            # print(f"  actual_move:         {actual_move_dict}", flush=True)
+            print("\n[ENGINE / POLICY CHOSEN ACTION]", flush=True)
+            print(f"  raw_action:          {raw_action}", flush=True)
+            print(f"  actual_legal_idx:    {actual_legal_idx}", flush=True)
+            print(f"  actual_uid:          {actual_uid}", flush=True)
+            print(f"  actual_move:         {actual_move_dict}", flush=True)
 
-            # print("\n[COMPARISON]", flush=True)
-            # print(f"  same_as_llm:         {same_as_llm}", flush=True)
-            # print("=" * 100 + "\n", flush=True)
+            print("\n[COMPARISON]", flush=True)
+            print(f"  same_as_llm:         {same_as_llm}", flush=True)
+            print("=" * 100 + "\n", flush=True)
 
             self._debug_step_count += 1
             self._last_llm_debug = None

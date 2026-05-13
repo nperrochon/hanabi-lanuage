@@ -20,7 +20,7 @@ llm_model="Qwen/Qwen2.5-1.5B-Instruct"
 exp="single_run_${rollout_threads}threads_${llm_model}"
 # exp="single_run_${rollout_threads}threads_Qwen2p5_1p5B_Instruct_eval"
 seed=1
-model_dir="/data/class/mae93/nperroch/hanabi-lanuage/onpolicy/scripts/results/Hanabi/Hanabi-Full/mappo/single_run_8threads_Qwen/Qwen2.5-1.5B-Instruct/wandb/run-20260508_014953-mscxdyj8/files"
+model_dir="~/hanabi-lanuage/onpolicy/scripts/results/Hanabi/Hanabi-Full/mappo/single_run_8threads_Qwen/Qwen2.5-14B-Instruct/wandb/latest-run/files"
 
 REPO="/data/class/mae93/nperroch/hanabi-lanuage"
 LOG_DIR="${REPO}/logs/eval_logs"
