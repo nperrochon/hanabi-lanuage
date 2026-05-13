@@ -2,7 +2,8 @@
 #SBATCH --job-name=hanabi_mappo_eval
 #SBATCH --output=/data/class/mae93/nperroch/hanabi-lanuage/logs/eval_logs/hanabi_%j.out
 #SBATCH --error=/data/class/mae93/nperroch/hanabi-lanuage/logs/eval_logs/hanabi_%j.err
-#SBATCH --partition=free-gpu
+#SBATCH --partition=gpu
+#SBATCH -A royf_lab_gpu
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
@@ -128,7 +129,7 @@ python -u onpolicy/scripts/eval/eval_hanabi.py \
   --llm_model "${llm_model}" \
   --llm_step_prob ${llm_step_prob} \
   --llm_backend vllm \
-  --llm_base_url http://127.0.0.1:8000/v1 \
+  --llm_base_url http://127.0.0.1:${PORT}/v1 \
   --model_dir "${model_dir}" \
   --use_eval --llm_debug --max_llm_debug_steps 50
 
