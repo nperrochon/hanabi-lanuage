@@ -16,7 +16,7 @@ num_agents=2
 algo="mappo"
 rollout_threads=8
 eval_rollout_threads=1
-llm_model="Qwen/Qwen2.5-1.5B-Instruct"
+llm_model="Qwen/Qwen2.5-14B-Instruct"
 exp="single_run_${rollout_threads}threads_${llm_model}"
 # exp="single_run_${rollout_threads}threads_Qwen2p5_1p5B_Instruct_eval"
 seed=1
@@ -50,8 +50,8 @@ export PATH="/data/class/mae93/nperroch/ollama-install/bin:$PATH"
 echo "Starting vLLM server..."
 conda activate vllm-server
 
-MODEL="Qwen/Qwen2.5-1.5B-Instruct"
-PORT=8000
+MODEL="Qwen/Qwen2.5-14B-Instruct"
+PORT=8002
 
 vllm serve "$MODEL" \
   --host 127.0.0.1 \
