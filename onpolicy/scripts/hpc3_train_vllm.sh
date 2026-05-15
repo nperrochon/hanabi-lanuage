@@ -19,7 +19,7 @@ rollout_threads=8
 llm_model="Qwen/Qwen2.5-7B-Instruct"
 exp="single_run_${rollout_threads}threads_${llm_model}"
 seed=1
-
+llm_vector_mode="analysis_embedding"
 REPO="/data/class/mae93/nperroch/hanabi-lanuage"
 LOG_DIR="${REPO}/logs"
 
@@ -124,7 +124,7 @@ python -u onpolicy/scripts/train/train_hanabi_forward.py \
   --llm_step_prob 0.02 \
   --llm_backend vllm \
   --llm_base_url http://127.0.0.1:${PORT}/v1 \
-  --llm_vector_mode softmax
+  --llm_vector_mode ${llm_vector_mode}
 
 
 echo "Job ended at: $(date)"
