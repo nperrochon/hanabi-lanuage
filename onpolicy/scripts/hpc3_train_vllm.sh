@@ -15,13 +15,14 @@ env="Hanabi"
 hanabi="Hanabi-Full"
 num_agents=2
 algo="mappo"
-rollout_threads=8
+rollout_threads=1
 llm_model="Qwen/Qwen2.5-7B-Instruct"
 exp="single_run_${rollout_threads}threads_${llm_model}"
 seed=1
 llm_vector_mode="analysis_embedding"
 REPO="/data/class/mae93/nperroch/hanabi-lanuage"
 LOG_DIR="${REPO}/logs"
+llm_step_prob=1.0
 
 # Make conda activate work in non-interactive SLURM shell
 source "$(conda info --base)/etc/profile.d/conda.sh"
@@ -95,6 +96,12 @@ echo ""
 echo "Starting Python training..."
 conda activate marl
 
+unset HF_ENDPOINT
+export HF_ENDPOINT=https://huggingface.co
+export HF_HOME=/data/class/mae93/nperroch/huggingface
+export TRANSFORMERS_CACHE=$HF_HOME
+mkdir -p "$HF_HOME"
+
 
 # --- Run Training ---
 echo "Starting Python training at: $(date)"
@@ -121,7 +128,7 @@ python -u onpolicy/scripts/train/train_hanabi_forward.py \
   --log_interval 5 \
   --use_llm \
   --llm_model ${llm_model} \
-  --llm_step_prob 0.02 \
+  --llm_step_prob ${llm_step_prob} \
   --llm_backend vllm \
   --llm_base_url http://127.0.0.1:${PORT}/v1 \
   --llm_vector_mode ${llm_vector_mode}

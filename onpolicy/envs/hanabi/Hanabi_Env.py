@@ -220,17 +220,23 @@ class HanabiEnv(Environment):
             from onpolicy.envs.hanabi.llm_action_helper import HanabiVLLMClient
 
             if self.llm_backend == "vllm":
+                print("[ENV] creating HanabiVLLMClient", flush=True)
                 self._llm_client = HanabiVLLMClient(
                     model_name=self.llm_model,
                     base_url=self.llm_base_url,
                     llm_vector_mode=self.llm_vector_mode,
                     analysis_encoder=self.analysis_encoder,
                 )
+                print("[ENV] created HanabiVLLMClient", flush=True)
+
             else:
                 raise ValueError(f"Unknown llm_backend: {self.llm_backend}")
 
             time.sleep(random.uniform(0, 10))
+
+            print("[ENV] verifying vLLM", flush=True)
             self._llm_client.verify()
+            print("[ENV] verified vLLM", flush=True)
 
             if self.llm_vector_mode == "analysis_embedding":
                 self.llm_feature_dim = self._llm_client.llm_feature_dim
