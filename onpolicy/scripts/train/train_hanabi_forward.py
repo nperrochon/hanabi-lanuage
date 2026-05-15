@@ -15,6 +15,14 @@ from onpolicy.config import get_config
 from onpolicy.envs.hanabi.Hanabi_Env import HanabiEnv
 from onpolicy.envs.env_wrappers import ChooseSubprocVecEnv, ChooseDummyVecEnv
 from onpolicy.runner.shared.hanabi_runner_forward import HanabiRunner as Runner
+import os
+
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+print("[MAIN] about to import transformers", flush=True)
+from transformers import AutoTokenizer, AutoModel
+
+print("[MAIN] imported transformers", flush=True)
 
 """Train script for Hanabi."""
 
