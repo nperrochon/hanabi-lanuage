@@ -15,14 +15,14 @@ env="Hanabi"
 hanabi="Hanabi-Full"
 num_agents=2
 algo="mappo"
-rollout_threads=1
+rollout_threads=8
 llm_model="Qwen/Qwen2.5-7B-Instruct"
 exp="single_run_${rollout_threads}threads_${llm_model}"
 seed=1
 llm_vector_mode="analysis_embedding"
 REPO="/data/class/mae93/nperroch/hanabi-lanuage"
 LOG_DIR="${REPO}/logs"
-llm_step_prob=1.0
+llm_step_prob=0.02
 
 # Make conda activate work in non-interactive SLURM shell
 source "$(conda info --base)/etc/profile.d/conda.sh"
