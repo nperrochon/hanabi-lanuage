@@ -1157,8 +1157,15 @@ class TextAnalysisEncoder:
         device: str = "cpu",
         max_length: int = 128,
     ):
+        print("[BERT] about to import torch", flush=True)
         import torch
+
+        print("[BERT] imported torch", flush=True)
+
+        print("[BERT] about to import transformers", flush=True)
         from transformers import AutoTokenizer, AutoModel
+
+        print("[BERT] imported transformers", flush=True)
 
         print("[BERT] imported torch/transformers", flush=True)
 
