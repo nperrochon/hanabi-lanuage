@@ -15,6 +15,18 @@ Usage with MAPPO:
 
 from __future__ import absolute_import, division
 
+print("[BERT] about to import torch", flush=True)
+import torch
+
+print("[BERT] imported torch", flush=True)
+
+print("[BERT] about to import transformers", flush=True)
+from transformers import AutoTokenizer, AutoModel
+
+print("[BERT] imported transformers", flush=True)
+
+print("[BERT] imported torch/transformers", flush=True)
+
 import json
 import re
 import numpy as np
@@ -1157,17 +1169,6 @@ class TextAnalysisEncoder:
         device: str = "cpu",
         max_length: int = 128,
     ):
-        print("[BERT] about to import torch", flush=True)
-        import torch
-
-        print("[BERT] imported torch", flush=True)
-
-        print("[BERT] about to import transformers", flush=True)
-        from transformers import AutoTokenizer, AutoModel
-
-        print("[BERT] imported transformers", flush=True)
-
-        print("[BERT] imported torch/transformers", flush=True)
 
         self.torch = torch
         self.device = device
