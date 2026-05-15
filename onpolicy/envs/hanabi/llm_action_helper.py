@@ -267,6 +267,86 @@ def build_hanabi_prompt(
     return "\n".join(prompt_parts)
 
 
+def build_hanabi_analysis_prompt(
+    text_observation: str,
+    legal_moves_dicts: List[Dict[str, Any]],
+    legal_move_uids: List[int],
+    game_info: Dict[str, Any],
+    num_legal_descriptions: int = 100,
+    hint_annotations: Optional[List[str]] = None,
+) -> str:
+    fireworks = game_info.get("fireworks", {})
+    info_tokens = game_info.get("information_tokens", 0)
+    life_tokens = game_info.get("life_tokens", 0)
+    deck_size = game_info.get("deck_size", 0)
+
+    move_descriptions = []
+    for i, move_dict in enumerate(legal_moves_dicts[:num_legal_descriptions]):
+        at = move_dict.get("action_type", "")
+
+        if at == "PLAY":
+            line = f"{i}: PLAY card at hand index {move_dict.get('card_index', '?')}"
+        elif at == "DISCARD":
+            line = f"{i}: DISCARD card at hand index {move_dict.get('card_index', '?')}"
+        elif at == "REVEAL_COLOR":
+            line = (
+                f"{i}: REVEAL_COLOR {move_dict.get('color', '?')} "
+                f"to teammate offset {move_dict.get('target_offset', '?')}"
+            )
+        elif at == "REVEAL_RANK":
+            rank_val = move_dict.get("rank", "?")
+            if isinstance(rank_val, int):
+                rank_val += 1
+            line = (
+                f"{i}: REVEAL_RANK {rank_val} "
+                f"to teammate offset {move_dict.get('target_offset', '?')}"
+            )
+        else:
+            line = f"{i}: {move_dict}"
+
+        ann = None
+        if hint_annotations is not None:
+            if isinstance(hint_annotations, dict):
+                ann = hint_annotations.get(i)
+            elif i < len(hint_annotations):
+                ann = hint_annotations[i]
+
+        if ann:
+            line += f" -> {ann}"
+
+        move_descriptions.append(line)
+
+    return f"""
+        You are analyzing a Hanabi game state for a reinforcement learning agent.
+
+        Do NOT choose a move.
+        Do NOT score legal moves.
+        Do NOT output JSON.
+
+        Give compact strategic information that may help the RL policy.
+
+        Use exactly this format:
+
+        SAFE_PLAY: yes/no/uncertain
+        HINT_USEFUL: yes/no/uncertain
+        DISCARD_RISK: low/medium/high
+        STATE_RISK: low/medium/high
+        ANALYSIS: one short sentence
+
+        Game summary:
+        Fireworks: {fireworks}
+        Information tokens: {info_tokens}
+        Life tokens: {life_tokens}
+        Cards left in deck: {deck_size}
+
+        Game state:
+        {text_observation.strip()}
+
+        Legal moves:
+        {chr(10).join(move_descriptions)}
+        """.strip()
+
+
 def parse_llm_action_response(
     response: str,
     num_legal: int,
@@ -676,6 +756,7 @@ class HanabiVLLMClient:
         top_p: float = 1.0,
         timeout: float = 60.0,
         cache_size: int = 50000,
+        analysis_encoder=None,
     ):
         self.model_name = model_name
         self.base_url = base_url.rstrip("/")
@@ -688,6 +769,14 @@ class HanabiVLLMClient:
         self._cache = OrderedDict()
         self.cache_hits = 0
         self.cache_misses = 0
+        self.analysis_encoder = analysis_encoder
+
+        if self.llm_vector_mode == "analysis_embedding":
+            if self.analysis_encoder is None:
+                self.analysis_encoder = TextAnalysisEncoder()
+            self.llm_feature_dim = self.analysis_encoder.output_dim
+        else:
+            self.llm_feature_dim = None
 
     def _make_cache_key(self, prompt: str) -> str:
         payload = {
@@ -785,13 +874,22 @@ class HanabiVLLMClient:
         if not legal_moves_dicts or not legal_move_uids:
             return None, np.zeros(num_moves, dtype=np.float32), {}
 
-        prompt = build_hanabi_prompt(
-            text_obs,
-            legal_moves_dicts,
-            legal_move_uids,
-            game_info,
-            hint_annotations=hint_annotations,
-        )
+        if self.llm_vector_mode == "analysis_embedding":
+            prompt = build_hanabi_analysis_prompt(
+                text_obs,
+                legal_moves_dicts,
+                legal_move_uids,
+                game_info,
+                hint_annotations=hint_annotations,
+            )
+        else:
+            prompt = build_hanabi_prompt(
+                text_obs,
+                legal_moves_dicts,
+                legal_move_uids,
+                game_info,
+                hint_annotations=hint_annotations,
+            )
 
         if not hasattr(self, "_printed_first_prompt"):
             print("\n" + "=" * 100, flush=True)
@@ -829,6 +927,32 @@ class HanabiVLLMClient:
 
         # return suggested_uid, llm_context_to_action_vector(num_moves, suggested_uid)
         response = self._generate(prompt)
+
+        num_legal = len(legal_move_uids)
+
+        if self.llm_vector_mode == "analysis_embedding":
+            analysis_text = response.strip()
+            llm_vector = self.analysis_encoder.encode(analysis_text)
+
+            suggested_uid = None
+            metadata = {"analysis_text": analysis_text}
+
+            self._cache_put(cache_key, (suggested_uid, llm_vector, metadata))
+
+            if not hasattr(self, "_debug_analysis_print_count"):
+                self._debug_analysis_print_count = 0
+
+            if self._debug_analysis_print_count < 30:
+                print("[LLM ANALYSIS]", analysis_text[:1000], flush=True)
+                print("[LLM ANALYSIS VECTOR SHAPE]", llm_vector.shape, flush=True)
+                print(
+                    "[LLM ANALYSIS VECTOR NORM]",
+                    float(np.linalg.norm(llm_vector)),
+                    flush=True,
+                )
+                self._debug_analysis_print_count += 1
+
+            return suggested_uid, llm_vector, metadata
 
         num_legal = len(legal_move_uids)
         scores_by_legal_idx, best_idx = parse_llm_score_response(response, num_legal)
@@ -900,15 +1024,23 @@ class HanabiVLLMClient:
 
         url = f"{self.base_url}/chat/completions"
 
+        if self.llm_vector_mode == "analysis_embedding":
+            system_content = (
+                "You are a concise Hanabi strategic analyst. "
+                "Do not choose an action. Do not output JSON."
+            )
+        else:
+            system_content = (
+                "You are a Hanabi move evaluator. "
+                "Return JSON only. No prose. No markdown."
+            )
+
         payload = {
             "model": self.model_name,
             "messages": [
                 {
                     "role": "system",
-                    "content": (
-                        "You are a Hanabi move evaluator. "
-                        "Return JSON only. No prose. No markdown."
-                    ),
+                    "content": system_content,
                 },
                 {
                     "role": "user",
@@ -994,3 +1126,51 @@ class HanabiVLLMClient:
             return ""
 
         return choices[0].get("text", "").strip()
+
+
+class TextAnalysisEncoder:
+    def __init__(
+        self,
+        model_name: str = "prajjwal1/bert-tiny",
+        device: str = "cpu",
+        max_length: int = 128,
+    ):
+        import torch
+        from transformers import AutoTokenizer, AutoModel
+
+        self.torch = torch
+        self.device = device
+        self.max_length = max_length
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.model = AutoModel.from_pretrained(model_name).to(device)
+        self.model.eval()
+        self.output_dim = self.model.config.hidden_size
+
+    def encode(self, text: str) -> np.ndarray:
+        torch = self.torch
+
+        if text is None:
+            text = ""
+
+        with torch.no_grad():
+            inputs = self.tokenizer(
+                text,
+                return_tensors="pt",
+                truncation=True,
+                padding=True,
+                max_length=self.max_length,
+            )
+            inputs = {k: v.to(self.device) for k, v in inputs.items()}
+            outputs = self.model(**inputs)
+
+            hidden = outputs.last_hidden_state
+            mask = inputs["attention_mask"].unsqueeze(-1)
+
+            pooled = (hidden * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1)
+            vec = pooled.squeeze(0).detach().cpu().numpy().astype(np.float32)
+
+        norm = np.linalg.norm(vec)
+        if norm > 1e-8:
+            vec = vec / norm
+
+        return vec

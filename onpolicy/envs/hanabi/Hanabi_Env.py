@@ -188,6 +188,7 @@ class HanabiEnv(Environment):
         )  # 1.0 = every step
         if self.llm_step_prob < 1.0:
             print(f"LLM step probability: {self.llm_step_prob}")
+        self.analysis_encoder = getattr(args, "analysis_encoder", None)
 
         self.verbose = args.verbose
         self.llm_debug = getattr(args, "llm_debug", False)
@@ -208,48 +209,51 @@ class HanabiEnv(Environment):
             self.game, pyhanabi.ObservationEncoderType.CANONICAL
         )
         self.players = self.game.num_players()
-        self.action_space = []
-        self.observation_space = []
-        self.share_observation_space = []
-        obs_dim = self.vectorized_observation_shape()[0] + self.players
-        share_dim = self.vectorized_share_observation_shape()[0] + self.players
-        if self.use_llm:
-            # Append LLM one-hot suggestion vector (length num_moves) to obs and share_obs
-            obs_dim += self.num_moves() + 1
-            share_dim += self.num_moves() + 1
-        for i in range(self.players):
-            self.action_space.append(Discrete(self.num_moves()))
-            self.observation_space.append([obs_dim])
-            self.share_observation_space.append([share_dim])
 
-        # Reuse one LLM client and track valid suggestion rate (for debugging)
         self._llm_client = None
         self._llm_nonzero_count = 0
         self._llm_total_count = 0
+
         if self.use_llm:
             import time
             import random
-            from onpolicy.envs.hanabi.llm_action_helper import (
-                # HanabiOllamaClient,
-                HanabiVLLMClient,
-            )
+            from onpolicy.envs.hanabi.llm_action_helper import HanabiVLLMClient
 
             if self.llm_backend == "vllm":
                 self._llm_client = HanabiVLLMClient(
                     model_name=self.llm_model,
                     base_url=self.llm_base_url,
                     llm_vector_mode=self.llm_vector_mode,
+                    analysis_encoder=self.analysis_encoder,
                 )
-            # elif self.llm_backend == "ollama":
-            #     self._llm_client = HanabiOllamaClient(
-            #         model_name=self.llm_model,
-            #         llm_vector_mode=self.llm_vector_mode,
-            #     )
             else:
                 raise ValueError(f"Unknown llm_backend: {self.llm_backend}")
-            # sleep for a random time to avoid race condition
+
             time.sleep(random.uniform(0, 10))
-            self._llm_client.verify()  # fail at startup if LLM server/model not ready
+            self._llm_client.verify()
+
+            if self.llm_vector_mode == "analysis_embedding":
+                self.llm_feature_dim = self._llm_client.llm_feature_dim
+            else:
+                self.llm_feature_dim = self.num_moves()
+        else:
+            self.llm_feature_dim = 0
+
+        obs_dim = self.vectorized_observation_shape()[0] + self.players
+        share_dim = self.vectorized_share_observation_shape()[0] + self.players
+
+        if self.use_llm:
+            obs_dim += self.llm_feature_dim + 1
+            share_dim += self.llm_feature_dim + 1
+
+        self.action_space = []
+        self.observation_space = []
+        self.share_observation_space = []
+
+        for i in range(self.players):
+            self.action_space.append(Discrete(self.num_moves()))
+            self.observation_space.append([obs_dim])
+            self.share_observation_space.append([share_dim])
 
     def seed(self, seed=None):
         if seed is None:
@@ -262,7 +266,7 @@ class HanabiEnv(Environment):
             return obs, share_obs
 
         used_flag = 0.0
-        llm_vector = np.zeros(self.num_moves(), dtype=np.float32)
+        llm_vector = np.zeros(self.llm_feature_dim, dtype=np.float32)
 
         # Important: assume no valid debug record unless this call creates one.
         self._last_llm_debug = None
@@ -281,7 +285,7 @@ class HanabiEnv(Environment):
                     hint_annotations,
                 ) = llm_context
 
-                suggested_uid, llm_vector, scores_by_legal_idx = (
+                suggested_uid, llm_vector, llm_metadata = (
                     self._llm_client.get_action_from_context(
                         llm_context=llm_context,
                         num_moves=self.num_moves(),
@@ -317,7 +321,7 @@ class HanabiEnv(Environment):
                         "suggested_uid": suggested_uid,
                         "suggested_legal_idx": suggested_legal_idx,
                         "suggested_move_dict": suggested_move_dict,
-                        "llm_scores_by_legal_idx": scores_by_legal_idx,
+                        "llm_metadata": llm_metadata,
                         "hint_annotations": hint_annotations,
                     }
 
@@ -332,6 +336,12 @@ class HanabiEnv(Environment):
 
         else:
             self.runs_without_llm += 1
+
+        if llm_vector.shape[0] != self.llm_feature_dim:
+            raise ValueError(
+                f"LLM vector shape mismatch: got {llm_vector.shape[0]}, "
+                f"expected {self.llm_feature_dim} for mode {self.llm_vector_mode}"
+            )
 
         extra = np.concatenate(
             [llm_vector, np.asarray([used_flag], dtype=np.float32)],
@@ -482,8 +492,8 @@ class HanabiEnv(Environment):
             base_obs_dim = self.vectorized_observation_shape()[0] + self.players
             base_share_dim = self.vectorized_share_observation_shape()[0] + self.players
             if self.use_llm:
-                base_obs_dim += self.num_moves() + 1
-                base_share_dim += self.num_moves() + 1
+                base_obs_dim += self.llm_feature_dim + 1
+                base_share_dim += self.llm_feature_dim + 1
             obs = np.zeros(base_obs_dim, dtype=np.float32)
             share_obs = np.zeros(base_share_dim, dtype=np.float32)
             available_actions = np.zeros(self.num_moves())
@@ -870,20 +880,20 @@ class HanabiEnv(Environment):
             print("\n[GAME STATE / OBSERVATION]", flush=True)
             print(dbg["condensed_obs"], flush=True)
 
-            print("\n[LEGAL MOVES]", flush=True)
-            for i, (uid, move_dict) in enumerate(zip(legal_uids, legal_dicts)):
-                print(f"  legal_idx={i:02d} | uid={uid:02d} | {move_dict}", flush=True)
-
+            if self.llm_vector_mode == "analysis_embedding":
+                print("\n[LLM ANALYSIS]", flush=True)
+                print(dbg["llm_metadata"].get("analysis_text", ""), flush=True)
+            else:
+                print("\n[LLM SCORES]", flush=True)
+                for i, move_dict in enumerate(legal_dicts):
+                    print(
+                        f"  legal_idx={i:02d} | score={dbg['llm_metadata'].get(i, 0):+.2f} | {move_dict}",
+                        flush=True,
+                    )
             print("\n[LLM SUGGESTION]", flush=True)
             print(f"  suggested_legal_idx: {dbg['suggested_legal_idx']}", flush=True)
             print(f"  suggested_uid:       {dbg['suggested_uid']}", flush=True)
             print(f"  suggested_move:      {dbg['suggested_move_dict']}", flush=True)
-            print("\n[LLM SCORES]", flush=True)
-            for i, move_dict in enumerate(legal_dicts):
-                print(
-                    f"  legal_idx={i:02d} | score={dbg['llm_scores_by_legal_idx'].get(i, 0):+.2f} | {move_dict}",
-                    flush=True,
-                )
 
             print("\n[ENGINE / POLICY CHOSEN ACTION]", flush=True)
             print(f"  raw_action:          {raw_action}", flush=True)
@@ -910,8 +920,8 @@ class HanabiEnv(Environment):
                     self.vectorized_share_observation_shape()[0] + self.players
                 )
                 if self.use_llm:
-                    base_obs_dim += self.num_moves() + 1
-                    base_share_dim += self.num_moves() + 1
+                    base_obs_dim += self.llm_feature_dim + 1
+                    base_share_dim += self.llm_feature_dim + 1
                 obs = np.zeros(base_obs_dim, dtype=np.float32)
                 share_obs = np.zeros(base_share_dim, dtype=np.float32)
                 rewards = np.zeros((self.players, 1))
