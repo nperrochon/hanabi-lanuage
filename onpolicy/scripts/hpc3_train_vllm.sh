@@ -97,10 +97,17 @@ echo "Starting Python training..."
 conda activate marl
 
 unset HF_ENDPOINT
-export HF_ENDPOINT=https://huggingface.co
 export HF_HOME=/data/class/mae93/nperroch/huggingface
 export TRANSFORMERS_CACHE=$HF_HOME
+export TOKENIZERS_PARALLELISM=false
 mkdir -p "$HF_HOME"
+
+python - <<'PY'
+from transformers import AutoTokenizer, AutoModel
+AutoTokenizer.from_pretrained("prajjwal1/bert-tiny")
+AutoModel.from_pretrained("prajjwal1/bert-tiny")
+print("bert-tiny cached")
+PY
 
 
 # --- Run Training ---

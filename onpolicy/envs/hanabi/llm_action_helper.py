@@ -933,9 +933,26 @@ class HanabiVLLMClient:
         if self.llm_vector_mode == "analysis_embedding":
             analysis_text = response.strip()
             if self.analysis_encoder is None:
-                print("[LLM] lazy-loading TextAnalysisEncoder", flush=True)
-                self.analysis_encoder = TextAnalysisEncoder()
-                print("[LLM] loaded TextAnalysisEncoder", flush=True)
+                import os
+                import random
+                import time
+                from filelock import FileLock
+
+                lock_path = "/data/class/mae93/nperroch/huggingface/bert_tiny_load.lock"
+                os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+
+                delay = random.uniform(0, 10)
+                print(f"[LLM] sleeping {delay:.2f}s before BERT load", flush=True)
+                time.sleep(delay)
+
+                print("[LLM] waiting for BERT load lock", flush=True)
+                with FileLock(lock_path, timeout=600):
+                    print("[LLM] acquired BERT load lock", flush=True)
+
+                    if self.analysis_encoder is None:
+                        print("[LLM] lazy-loading TextAnalysisEncoder", flush=True)
+                        self.analysis_encoder = TextAnalysisEncoder()
+                        print("[LLM] loaded TextAnalysisEncoder", flush=True)
 
             llm_vector = self.analysis_encoder.encode(analysis_text)
 
@@ -1143,13 +1160,29 @@ class TextAnalysisEncoder:
         import torch
         from transformers import AutoTokenizer, AutoModel
 
+        print("[BERT] imported torch/transformers", flush=True)
+
         self.torch = torch
         self.device = device
         self.max_length = max_length
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.model = AutoModel.from_pretrained(model_name).to(device)
+
+        print("[BERT] loading tokenizer", flush=True)
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            model_name,
+            local_files_only=True,
+        )
+        print("[BERT] loaded tokenizer", flush=True)
+
+        print("[BERT] loading model", flush=True)
+        self.model = AutoModel.from_pretrained(
+            model_name,
+            local_files_only=True,
+        ).to(device)
+        print("[BERT] loaded model", flush=True)
+
         self.model.eval()
         self.output_dim = self.model.config.hidden_size
+        print(f"[BERT] output_dim={self.output_dim}", flush=True)
 
     def encode(self, text: str) -> np.ndarray:
         torch = self.torch
