@@ -772,9 +772,9 @@ class HanabiVLLMClient:
         self.analysis_encoder = analysis_encoder
 
         if self.llm_vector_mode == "analysis_embedding":
-            if self.analysis_encoder is None:
-                self.analysis_encoder = TextAnalysisEncoder()
-            self.llm_feature_dim = self.analysis_encoder.output_dim
+            # if self.analysis_encoder is None:
+            #     self.analysis_encoder = TextAnalysisEncoder()
+            self.llm_feature_dim = 128  # self.analysis_encoder.output_dim
         else:
             self.llm_feature_dim = None
 
@@ -932,6 +932,11 @@ class HanabiVLLMClient:
 
         if self.llm_vector_mode == "analysis_embedding":
             analysis_text = response.strip()
+            if self.analysis_encoder is None:
+                print("[LLM] lazy-loading TextAnalysisEncoder", flush=True)
+                self.analysis_encoder = TextAnalysisEncoder()
+                print("[LLM] loaded TextAnalysisEncoder", flush=True)
+
             llm_vector = self.analysis_encoder.encode(analysis_text)
 
             suggested_uid = None
