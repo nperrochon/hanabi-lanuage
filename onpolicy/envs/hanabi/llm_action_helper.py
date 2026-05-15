@@ -35,6 +35,45 @@ import hashlib
 from collections import OrderedDict
 
 
+_GLOBAL_TEXT_ANALYSIS_ENCODER = None
+
+
+def preload_text_analysis_encoder(
+    model_name: str = "prajjwal1/bert-tiny",
+    device: str = "cpu",
+) -> "TextAnalysisEncoder":
+    global _GLOBAL_TEXT_ANALYSIS_ENCODER
+
+    if _GLOBAL_TEXT_ANALYSIS_ENCODER is None:
+        print(
+            "[BERT PRELOAD] loading TextAnalysisEncoder in parent process", flush=True
+        )
+        _GLOBAL_TEXT_ANALYSIS_ENCODER = TextAnalysisEncoder(
+            model_name=model_name,
+            device=device,
+        )
+        print(
+            f"[BERT PRELOAD] loaded encoder dim={_GLOBAL_TEXT_ANALYSIS_ENCODER.output_dim}",
+            flush=True,
+        )
+
+    return _GLOBAL_TEXT_ANALYSIS_ENCODER
+
+
+def get_text_analysis_encoder() -> "TextAnalysisEncoder":
+    global _GLOBAL_TEXT_ANALYSIS_ENCODER
+
+    if _GLOBAL_TEXT_ANALYSIS_ENCODER is None:
+        # Fallback path. Ideally this should not happen in SubprocVecEnv.
+        print(
+            "[BERT WARNING] encoder was not preloaded; loading in this process",
+            flush=True,
+        )
+        _GLOBAL_TEXT_ANALYSIS_ENCODER = TextAnalysisEncoder()
+
+    return _GLOBAL_TEXT_ANALYSIS_ENCODER
+
+
 def build_hanabi_prompt(
     text_observation: str,
     legal_moves_dicts: List[Dict[str, Any]],
@@ -963,7 +1002,7 @@ class HanabiVLLMClient:
 
                     if self.analysis_encoder is None:
                         print("[LLM] lazy-loading TextAnalysisEncoder", flush=True)
-                        self.analysis_encoder = TextAnalysisEncoder()
+                        self.analysis_encoder = get_text_analysis_encoder()
                         print("[LLM] loaded TextAnalysisEncoder", flush=True)
 
             llm_vector = self.analysis_encoder.encode(analysis_text)

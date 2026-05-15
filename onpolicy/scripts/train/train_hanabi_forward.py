@@ -26,6 +26,21 @@ print("[MAIN] imported transformers", flush=True)
 
 """Train script for Hanabi."""
 
+if (
+    getattr(all_args, "use_llm", False)
+    and getattr(all_args, "llm_vector_mode", "") == "analysis_embedding"
+):
+    print("[MAIN] preloading BERT text encoder before env worker fork", flush=True)
+
+    from onpolicy.envs.hanabi.llm_action_helper import preload_text_analysis_encoder
+
+    preload_text_analysis_encoder(
+        model_name="prajjwal1/bert-tiny",
+        device="cpu",
+    )
+
+    print("[MAIN] finished preloading BERT text encoder", flush=True)
+
 
 def make_train_env(all_args):
     def get_env_fn(rank):
