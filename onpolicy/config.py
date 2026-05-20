@@ -588,7 +588,10 @@ def get_config():
         help="the probability of using llm at each step (default: 1.0)",
     )
     parser.add_argument(
-        "--llm_backend", type=str, default="vllm", choices=["ollama", "vllm"]
+        "--llm_backend",
+        type=str,
+        default="vllm",
+        choices=["ollama", "vllm", "qwen_embedding"],
     )
     parser.add_argument("--llm_base_url", type=str, default="http://127.0.0.1:8000/v1")
 
@@ -606,7 +609,6 @@ def get_config():
         default="softmax",
         choices=["one_hot", "softmax", "analysis_embedding"],
     )
-
     # add for transformer
     parser.add_argument("--encode_state", action="store_true", default=False)
     parser.add_argument("--n_block", type=int, default=1)

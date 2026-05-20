@@ -219,7 +219,19 @@ class HanabiEnv(Environment):
             import random
             from onpolicy.envs.hanabi.llm_action_helper import HanabiVLLMClient
 
-            if self.llm_backend == "vllm":
+            if self.llm_backend == "qwen_embedding":
+                from onpolicy.envs.hanabi.qwen_embedding_helper import (
+                    QwenEmbeddingClient,
+                )
+
+                print("[ENV] creating QwenEmbeddingClient", flush=True)
+                self._llm_client = QwenEmbeddingClient(
+                    model_name=self.llm_model,
+                    output_dim=int(getattr(args, "llm_embedding_dim", 1024)),
+                )
+                print("[ENV] created QwenEmbeddingClient", flush=True)
+
+            elif self.llm_backend == "vllm":
                 print("[ENV] creating HanabiVLLMClient", flush=True)
                 self._llm_client = HanabiVLLMClient(
                     model_name=self.llm_model,
@@ -234,11 +246,11 @@ class HanabiEnv(Environment):
 
             time.sleep(random.uniform(0, 10))
 
-            print("[ENV] verifying vLLM", flush=True)
+            print(f"[ENV] verifying llm backend: {self.llm_backend}", flush=True)
             self._llm_client.verify()
-            print("[ENV] verified vLLM", flush=True)
+            print(f"[ENV] verified llm backend: {self.llm_backend}", flush=True)
 
-            if self.llm_vector_mode == "analysis_embedding":
+            if self.llm_vector_mode in ("analysis_embedding", "qwen_embedding"):
                 self.llm_feature_dim = self._llm_client.llm_feature_dim
             else:
                 self.llm_feature_dim = self.num_moves()
@@ -889,6 +901,19 @@ class HanabiEnv(Environment):
             if self.llm_vector_mode == "analysis_embedding":
                 print("\n[LLM ANALYSIS]", flush=True)
                 print(dbg["llm_metadata"].get("analysis_text", ""), flush=True)
+
+            elif self.llm_vector_mode == "qwen_embedding":
+                print("\n[QWEN EMBEDDING]", flush=True)
+                print(
+                    "embedding_dim:",
+                    dbg["llm_metadata"].get("embedding_dim"),
+                    flush=True,
+                )
+                print(
+                    "embedding_text preview:",
+                    dbg["llm_metadata"].get("embedding_text", "")[:1000],
+                    flush=True,
+                )
             else:
                 print("\n[LLM SCORES]", flush=True)
                 for i, move_dict in enumerate(legal_dicts):
