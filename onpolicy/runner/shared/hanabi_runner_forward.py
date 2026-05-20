@@ -8,8 +8,6 @@ from itertools import chain
 print("[MAIN] preloading torch/transformers/sentence_transformers", flush=True)
 
 import torch
-import transformers
-import sentence_transformers
 
 print("[MAIN] preloaded torch/transformers/sentence_transformers", flush=True)
 

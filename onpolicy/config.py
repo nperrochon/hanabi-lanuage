@@ -615,6 +615,19 @@ def get_config():
         default=1024,
         help="the dimension of the embedding for the llm (default: 1024)",
     )
+    parser.add_argument(
+        "--qwen_embed_host",
+        type=str,
+        default="127.0.0.1",
+        help="Host for Qwen embedding server.",
+    )
+
+    parser.add_argument(
+        "--qwen_embed_port",
+        type=int,
+        default=8765,
+        help="Port for Qwen embedding server.",
+    )
     # add for transformer
     parser.add_argument("--encode_state", action="store_true", default=False)
     parser.add_argument("--n_block", type=int, default=1)

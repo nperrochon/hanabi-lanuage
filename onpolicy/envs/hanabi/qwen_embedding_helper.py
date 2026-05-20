@@ -83,6 +83,18 @@ class QwenEmbeddingClient:
         return self.get_embedding_from_context(llm_context, num_moves, hint_annotations)
 
     def get_embedding_from_context(self, llm_context, num_moves, hint_annotations=None):
+        (
+            text_obs,
+            condensed_obs,
+            legal_moves_dicts,
+            legal_move_uids,
+            game_info,
+            hint_annotations_from_context,
+        ) = llm_context
+
+        if hint_annotations is None:
+            hint_annotations = hint_annotations_from_context
+
         text = self._build_embedding_text(
             text_obs=text_obs,
             legal_moves_dicts=legal_moves_dicts,

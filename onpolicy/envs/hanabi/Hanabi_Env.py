@@ -219,15 +219,16 @@ class HanabiEnv(Environment):
             import random
 
             if self.llm_backend == "qwen_embedding":
-                from onpolicy.envs.hanabi.qwen_embedding_helper import (
-                    QwenEmbeddingClient,
+                from onpolicy.envs.hanabi.qwen_embedding_client import (
+                    RemoteQwenEmbeddingClient,
                 )
 
-                print("[ENV] creating QwenEmbeddingClient", flush=True)
-                self._llm_client = QwenEmbeddingClient(
-                    model_name=self.llm_model,
+                print("[ENV] creating RemoteQwenEmbeddingClient", flush=True)
+                self._llm_client = RemoteQwenEmbeddingClient(
+                    host=getattr(args, "qwen_embed_host", "127.0.0.1"),
+                    port=getattr(args, "qwen_embed_port", 8765),
                 )
-                print("[ENV] created QwenEmbeddingClient", flush=True)
+                print("[ENV] created RemoteQwenEmbeddingClient", flush=True)
 
             elif self.llm_backend == "vllm":
                 from onpolicy.envs.hanabi.llm_action_helper import HanabiVLLMClient

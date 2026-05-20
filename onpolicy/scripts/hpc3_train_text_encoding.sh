@@ -12,105 +12,82 @@
 
 set -euo pipefail
 
-# --- Variables ---
 env="Hanabi"
 hanabi="Hanabi-Full"
 num_agents=2
 algo="mappo"
-
-# WARNING: with SubprocVecEnv, each rollout worker may load its own embedding model.
-# If this OOMs or is slow, reduce this to 1 or 2.
 rollout_threads=8
-
 seed=1
 
-# Qwen text embedding model, not Qwen instruct generation model.
 llm_model="Qwen/Qwen3-Embedding-0.6B"
 llm_backend="qwen_embedding"
 llm_vector_mode="qwen_embedding"
-llm_embedding_dim=1024
 llm_step_prob=0.02
-
-exp="qwen_embed_${rollout_threads}threads_step${llm_step_prob}_seed${seed}"
 
 REPO="/data/class/mae93/nperroch/hanabi-lanuage"
 LOG_DIR="${REPO}/logs"
-
 mkdir -p "${LOG_DIR}"
 
+# Avoid port conflicts between jobs.
+EMBED_PORT=$((8700 + SLURM_JOB_ID % 1000))
+EMBED_HOST="127.0.0.1"
+
+exp="qwen_embed_server_${rollout_threads}threads_step${llm_step_prob}_seed${seed}"
+
 echo "Job started at: $(date)"
-echo "Running on host: $(hostname)"
-echo "Repo: ${REPO}"
+echo "Host: $(hostname)"
 echo "Experiment: ${exp}"
+echo "Embedding server: ${EMBED_HOST}:${EMBED_PORT}"
 
-# Make conda activate work in non-interactive SLURM shell
 source "$(conda info --base)/etc/profile.d/conda.sh"
-
-# --- CUDA / GPU info ---
-module avail cuda || true
-module load cuda || true
-
-if command -v nvcc >/dev/null 2>&1; then
-  export CUDA_HOME=$(dirname "$(dirname "$(which nvcc)")")
-  export PATH="$CUDA_HOME/bin:$PATH"
-  echo "CUDA_HOME=$CUDA_HOME"
-  nvcc --version
-else
-  echo "nvcc not found; continuing as long as PyTorch sees CUDA."
-fi
-
-nvidia-smi || true
-
-# --- Python env ---
 conda activate marl
 
 cd "${REPO}"
 
 unset HF_ENDPOINT
 export HF_HOME=/data/class/mae93/nperroch/huggingface
-export TRANSFORMERS_CACHE="$HF_HOME"
 export TOKENIZERS_PARALLELISM=false
 export PYTHONUNBUFFERED=1
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 
-mkdir -p "$HF_HOME"
+nvidia-smi || true
 
-echo "Checking Python / CUDA..."
-python - <<'PY'
-import torch
-print("torch:", torch.__version__)
-print("CUDA available:", torch.cuda.is_available())
-print("CUDA device:", torch.cuda.get_device_name(0) if torch.cuda.is_available() else "no cuda")
-PY
+echo "Starting Qwen embedding server..."
+python -u onpolicy/envs/hanabi/qwen_embedding_server.py \
+  --model "${llm_model}" \
+  --host "${EMBED_HOST}" \
+  --port "${EMBED_PORT}" \
+  --device cuda \
+  > "${LOG_DIR}/qwen_embed_server_${SLURM_JOB_ID}.log" 2>&1 &
 
-echo "Checking Qwen embedding dependencies..."
-python - <<'PY'
-import sentence_transformers
-import transformers
-print("sentence_transformers:", sentence_transformers.__version__)
-print("transformers:", transformers.__version__)
-PY
+EMBED_PID=$!
 
-echo "Pre-caching / verifying Qwen embedding model..."
-python - <<PY
-from sentence_transformers import SentenceTransformer
-import torch
+cleanup() {
+  echo "Cleaning up embedding server PID=${EMBED_PID}"
+  kill "${EMBED_PID}" 2>/dev/null || true
+}
+trap cleanup EXIT
 
-model_name = "${llm_model}"
-device = "cuda" if torch.cuda.is_available() else "cpu"
+echo "Waiting for Qwen embedding server..."
+for i in {1..120}; do
+  if curl -s "http://${EMBED_HOST}:${EMBED_PORT}/health" | grep -q '"ok": true'; then
+    echo "Qwen embedding server ready after ${i} checks"
+    curl -s "http://${EMBED_HOST}:${EMBED_PORT}/health"
+    echo ""
+    break
+  fi
 
-print(f"Loading {model_name} on {device}")
-model = SentenceTransformer(model_name, device=device)
-emb = model.encode(["test hanabi state"], convert_to_numpy=True, normalize_embeddings=True)
-print("embedding shape:", emb.shape)
+  if ! kill -0 "${EMBED_PID}" 2>/dev/null; then
+    echo "Qwen embedding server died. Last log lines:"
+    tail -100 "${LOG_DIR}/qwen_embed_server_${SLURM_JOB_ID}.log"
+    exit 1
+  fi
 
-expected_dim = ${llm_embedding_dim}
-assert emb.shape[1] == expected_dim, f"Expected dim {expected_dim}, got {emb.shape[1]}"
-print("Qwen embedding model verified")
-PY
+  echo "Still waiting for Qwen embedding server... check ${i}"
+  sleep 5
+done
 
-# --- Run Training ---
 echo "Starting Python training at: $(date)"
 
 python -u onpolicy/scripts/train/train_hanabi_forward.py \
@@ -138,7 +115,8 @@ python -u onpolicy/scripts/train/train_hanabi_forward.py \
   --llm_model ${llm_model} \
   --llm_backend ${llm_backend} \
   --llm_vector_mode ${llm_vector_mode} \
-  --llm_embedding_dim ${llm_embedding_dim} \
-  --llm_step_prob ${llm_step_prob}
+  --llm_step_prob ${llm_step_prob} \
+  --qwen_embed_host ${EMBED_HOST} \
+  --qwen_embed_port ${EMBED_PORT}
 
 echo "Job ended at: $(date)"
