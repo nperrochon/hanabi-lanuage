@@ -607,7 +607,13 @@ def get_config():
         "--llm_vector_mode",
         type=str,
         default="softmax",
-        choices=["one_hot", "softmax", "analysis_embedding"],
+        choices=["one_hot", "softmax", "analysis_embedding", "qwen_embedding"],
+    )
+    parser.add_argument(
+        "--llm_embedding_dim",
+        type=int,
+        default=1024,
+        help="the dimension of the embedding for the llm (default: 1024)",
     )
     # add for transformer
     parser.add_argument("--encode_state", action="store_true", default=False)
