@@ -3,7 +3,15 @@ import wandb
 import os
 import numpy as np
 from itertools import chain
+
+
+print("[MAIN] preloading torch/transformers/sentence_transformers", flush=True)
+
 import torch
+import transformers
+import sentence_transformers
+
+print("[MAIN] preloaded torch/transformers/sentence_transformers", flush=True)
 
 from onpolicy.utils.util import update_linear_schedule
 from onpolicy.runner.shared.base_runner import Runner
@@ -224,9 +232,13 @@ class HanabiRunner(Runner):
                             total = with_llm + without_llm
                             print(f"LLM runs with LLM: {with_llm}")
                             print(f"LLM runs without LLM: {without_llm}")
-                            print(f"LLM use rate: {with_llm / total if total > 0 else 0.0}")
+                            print(
+                                f"LLM use rate: {with_llm / total if total > 0 else 0.0}"
+                            )
                         else:
-                            print("LLM counters not accessible in SubprocVecEnv (multi-process)")
+                            print(
+                                "LLM counters not accessible in SubprocVecEnv (multi-process)"
+                            )
                     self.scores = []
 
                 train_infos["average_step_rewards"] = np.mean(self.buffer.rewards)

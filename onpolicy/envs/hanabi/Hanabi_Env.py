@@ -217,7 +217,6 @@ class HanabiEnv(Environment):
         if self.use_llm:
             import time
             import random
-            from onpolicy.envs.hanabi.llm_action_helper import HanabiVLLMClient
 
             if self.llm_backend == "qwen_embedding":
                 from onpolicy.envs.hanabi.qwen_embedding_helper import (
@@ -227,11 +226,12 @@ class HanabiEnv(Environment):
                 print("[ENV] creating QwenEmbeddingClient", flush=True)
                 self._llm_client = QwenEmbeddingClient(
                     model_name=self.llm_model,
-                    output_dim=int(getattr(args, "llm_embedding_dim", 1024)),
                 )
                 print("[ENV] created QwenEmbeddingClient", flush=True)
 
             elif self.llm_backend == "vllm":
+                from onpolicy.envs.hanabi.llm_action_helper import HanabiVLLMClient
+
                 print("[ENV] creating HanabiVLLMClient", flush=True)
                 self._llm_client = HanabiVLLMClient(
                     model_name=self.llm_model,
