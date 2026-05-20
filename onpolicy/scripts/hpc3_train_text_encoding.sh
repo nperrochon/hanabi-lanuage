@@ -22,7 +22,7 @@ seed=1
 llm_model="Qwen/Qwen3-Embedding-0.6B"
 llm_backend="qwen_embedding"
 llm_vector_mode="qwen_embedding"
-llm_step_prob=0.02
+llm_step_prob=0.1
 
 REPO="/data/class/mae93/nperroch/hanabi-lanuage"
 LOG_DIR="${REPO}/logs"
