@@ -77,7 +77,6 @@ class RemoteQwenEmbeddingClient:
         raise RuntimeError(f"Could not connect to Qwen embedding server: {last_err}")
 
     def embed_text(self, text):
-        # Change from GET to POST
         url = f"{self.base_url}/embed"
         data = json.dumps({"text": text}).encode("utf-8")
         req = Request(
@@ -85,7 +84,9 @@ class RemoteQwenEmbeddingClient:
         )
 
         with urlopen(req, timeout=self.timeout) as resp:
-            return json.loads(resp.read().decode("utf-8"))["embedding"]
+            result = json.loads(resp.read().decode("utf-8"))
+            # Convert the JSON list back to a numpy array for the RL code
+            return np.array(result["embedding"])
 
     def get_action_from_context(self, llm_context, num_moves, hint_annotations=None):
         return self.get_embedding_from_context(llm_context, num_moves, hint_annotations)
