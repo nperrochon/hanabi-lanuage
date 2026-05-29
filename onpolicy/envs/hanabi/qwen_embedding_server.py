@@ -15,8 +15,12 @@ class TextRequest(BaseModel):
 
 @app.get("/health")
 async def health():
-    # We return "ok": True so the bash script's grep finds it
-    return {"ok": True, "status": "online"}
+    # The client expects 'embedding_dim' to know how big the vector is
+    return {
+        "ok": True,
+        "status": "online",
+        "embedding_dim": 1024,  # Standard for Qwen-0.6B
+    }
 
 
 @app.post("/embed")
