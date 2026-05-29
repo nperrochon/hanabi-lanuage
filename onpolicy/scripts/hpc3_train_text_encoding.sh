@@ -16,8 +16,9 @@ env="Hanabi"
 hanabi="Hanabi-Full"
 num_agents=2
 algo="mappo"
-rollout_threads=8
+rollout_threads=32
 seed=1
+num_mini_batch=4
 
 llm_model="Qwen/Qwen3-Embedding-0.6B"
 llm_backend="qwen_embedding"
@@ -99,7 +100,7 @@ python -u onpolicy/scripts/train/train_hanabi_forward.py \
   --seed ${seed} \
   --n_training_threads 1 \
   --n_rollout_threads ${rollout_threads} \
-  --num_mini_batch 1 \
+  --num_mini_batch ${num_mini_batch} \
   --episode_length 100 \
   --num_env_steps 1000000000 \
   --ppo_epoch 10 \
