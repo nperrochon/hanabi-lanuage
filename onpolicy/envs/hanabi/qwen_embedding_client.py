@@ -77,22 +77,15 @@ class RemoteQwenEmbeddingClient:
         raise RuntimeError(f"Could not connect to Qwen embedding server: {last_err}")
 
     def embed_text(self, text):
-        response = self._post_json("/embed", {"text": text})
+        # Change from GET to POST
+        url = f"{self.base_url}/embed"
+        data = json.dumps({"text": text}).encode("utf-8")
+        req = Request(
+            url, data=data, headers={"Content-Type": "application/json"}, method="POST"
+        )
 
-        if not response.get("ok"):
-            raise RuntimeError(f"Qwen embedding server error: {response}")
-
-        self.cache_hits = int(response.get("cache_hits", self.cache_hits))
-        self.cache_misses = int(response.get("cache_misses", self.cache_misses))
-
-        emb = np.asarray(response["embedding"], dtype=np.float32)
-
-        if emb.shape[0] != self.llm_feature_dim:
-            raise ValueError(
-                f"Embedding dim mismatch: got {emb.shape[0]}, expected {self.llm_feature_dim}"
-            )
-
-        return emb
+        with urlopen(req, timeout=self.timeout) as resp:
+            return json.loads(resp.read().decode("utf-8"))["embedding"]
 
     def get_action_from_context(self, llm_context, num_moves, hint_annotations=None):
         return self.get_embedding_from_context(llm_context, num_moves, hint_annotations)
