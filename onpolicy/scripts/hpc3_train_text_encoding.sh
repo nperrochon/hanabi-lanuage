@@ -71,7 +71,7 @@ trap cleanup EXIT
 
 echo "Waiting for Qwen embedding server..."
 for i in {1..120}; do
-  if curl -s "http://${EMBED_HOST}:${EMBED_PORT}/health" | grep -q '"ok": true'; then
+  if curl -s "http://${EMBED_HOST}:${EMBED_PORT}/health" | grep -iq '"ok": true'; then
     echo "Qwen embedding server ready after ${i} checks"
     curl -s "http://${EMBED_HOST}:${EMBED_PORT}/health"
     echo ""
