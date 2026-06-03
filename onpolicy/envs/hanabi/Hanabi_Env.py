@@ -291,7 +291,7 @@ class HanabiEnv(Environment):
         self._last_llm_debug = None
 
         # Decide whether to call LLM
-        if np.random.rand() <= getattr(self, "llm_step_prob", 1.0):
+        if getattr(self, "_use_llm_this_episode", True):
             llm_context = self.get_llm_context()
 
             if llm_context is not None:
@@ -479,6 +479,11 @@ class HanabiEnv(Environment):
 
             while self.state.cur_player() == pyhanabi.CHANCE_PLAYER_ID:
                 self.state.deal_random_card()
+
+            if self.use_llm:
+                self._use_llm_this_episode = np.random.rand() <= self.llm_step_prob
+            else:
+                self._use_llm_this_episode = False
 
             observation = self._make_observation_all_players()
             current_player = self.state.cur_player()
