@@ -162,7 +162,6 @@ CMD=(
   --layer_N 2
   --entropy_coef 0.015
   --log_interval 5
-  --use_wandb
   --save_every_x_updates 200
 )
 
