@@ -9,14 +9,15 @@
 #SBATCH --output=logs/slurm_embed_cmp_%A_%a.out
 #SBATCH --error=logs/slurm_embed_cmp_%A_%a.err
 
-set -euo pipefail
-
 # =========================
 # Environment setup
 # =========================
 
+# Environment setup
+set +u
 source ~/.bashrc
-conda activate marl
+conda activate marl_min
+set -euo pipefail
 
 REPO="${HOME}/hanabi-lanuage"
 LOG_DIR="${REPO}/logs"
