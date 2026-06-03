@@ -176,13 +176,6 @@ def main(args):
     print(f"[DEBUG] run_dir={run_dir}", flush=True)
 
     if all_args.use_wandb:
-        print("[DEBUG] about to call wandb.init", flush=True)
-        run = wandb.init(...)
-        print(f"[DEBUG] wandb.init returned: {run}", flush=True)
-    else:
-        print("[DEBUG] NOT calling wandb.init because use_wandb is False", flush=True)
-
-    if all_args.use_wandb:
         run = wandb.init(
             config=all_args,
             project=all_args.env_name,
