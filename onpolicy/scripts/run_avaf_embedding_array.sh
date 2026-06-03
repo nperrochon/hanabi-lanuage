@@ -16,7 +16,7 @@
 # Environment setup
 set +u
 source ~/.bashrc
-conda activate marl_min
+conda activate qwen3_embed
 set -euo pipefail
 
 REPO="${HOME}/hanabi-lanuage"
@@ -25,12 +25,21 @@ mkdir -p "${LOG_DIR}"
 
 cd "${REPO}"
 
+PYTHON="/home/nperroch/.conda/envs/qwen3_embed/bin/python"
+export PATH="/home/nperroch/.conda/envs/qwen3_embed/bin:$PATH"
+
 unset HF_ENDPOINT
 export HF_HOME="${HOME}/.cache/huggingface"
 export TOKENIZERS_PARALLELISM=false
 export PYTHONUNBUFFERED=1
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
+
+export WANDB_MODE=online
+export WANDB_SILENT=false
+export WANDB_CONSOLE=off
+export WANDB_DIR="${REPO}/wandb"
+mkdir -p "${WANDB_DIR}"
 
 echo "Job ID: ${SLURM_JOB_ID}"
 echo "Array Task ID: ${SLURM_ARRAY_TASK_ID}"
@@ -80,7 +89,7 @@ echo "LLM step prob: ${llm_step_prob}"
 
 # Avoid port conflicts between array tasks.
 EMBED_HOST="127.0.0.1"
-EMBED_PORT=$((8700 + SLURM_ARRAY_TASK_ID + (SLURM_JOB_ID % 1000)))
+EMBED_PORT=$((20000 + (SLURM_ARRAY_JOB_ID % 1000) * 10 + SLURM_ARRAY_TASK_ID))
 
 # =========================
 # Optional embedding server
@@ -89,7 +98,7 @@ EMBED_PORT=$((8700 + SLURM_ARRAY_TASK_ID + (SLURM_JOB_ID % 1000)))
 if [ "${use_llm}" = "1" ]; then
   echo "Starting embedding server on ${EMBED_HOST}:${EMBED_PORT}..."
 
-  python -u onpolicy/envs/hanabi/qwen_embedding_server.py \
+  "${PYTHON}" -u onpolicy/envs/hanabi/qwen_embedding_server.py \
     --model "${llm_model}" \
     --host "${EMBED_HOST}" \
     --port "${EMBED_PORT}" \
@@ -131,7 +140,7 @@ fi
 # =========================
 
 CMD=(
-  python -u onpolicy/scripts/train/train_hanabi_forward.py
+  "${PYTHON}" -u onpolicy/scripts/train/train_hanabi_forward.py
   --env_name "${env}"
   --algorithm_name "${algo}"
   --experiment_name "${exp}"
