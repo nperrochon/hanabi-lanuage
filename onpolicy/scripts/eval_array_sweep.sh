@@ -1,0 +1,195 @@
+#!/bin/bash
+#SBATCH --partition=ava_f.p
+#SBATCH --gres=gpu:1
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=64G
+#SBATCH --time=1-00:00:00          # Evaluation completes significantly faster than training
+#SBATCH --array=0-5%6             # Maps perfectly across your 6 configurations
+#SBATCH --job-name=hanabi_eval_sweep
+#SBATCH --output=logs/slurm_eval_cmp_%A_%a.out
+#SBATCH --error=logs/slurm_eval_cmp_%A_%a.err
+
+# =========================
+# Environment setup
+# =========================
+set +u
+source ~/.bashrc
+conda activate qwen3_embed
+set -euo pipefail
+
+REPO="${HOME}/hanabi-lanuage"
+LOG_DIR="${REPO}/logs"
+mkdir -p "${LOG_DIR}"
+
+cd "${REPO}"
+
+PYTHON="/home/nperroch/.conda/envs/qwen3_embed/bin/python"
+export PATH="/home/nperroch/.conda/envs/qwen3_embed/bin:$PATH"
+
+unset HF_ENDPOINT
+export HF_HOME="${HOME}/.cache/huggingface"
+export TOKENIZERS_PARALLELISM=false
+export PYTHONUNBUFFERED=1
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+
+export WANDB_MODE=online
+export WANDB_SILENT=false
+export WANDB_CONSOLE=off
+export WANDB_DIR="${REPO}/wandb"
+mkdir -p "${WANDB_DIR}"
+
+echo "Job ID: ${SLURM_JOB_ID}"
+echo "Array Task ID: ${SLURM_ARRAY_TASK_ID}"
+echo "Node: ${SLURMD_NODENAME}"
+echo "CUDA_VISIBLE_DEVICES: ${CUDA_VISIBLE_DEVICES}"
+echo "Started at: $(date)"
+
+nvidia-smi || true
+
+# =========================
+# Fixed Hanabi / PPO settings
+# =========================
+env="Hanabi"
+hanabi="Hanabi-Full"
+num_agents=2
+algo="mappo"
+rollout_threads=1         # Standardized for baseline eval evaluation tracking
+num_mini_batch=1
+
+# =========================
+# Define configs
+# Format: name|use_llm|model|backend|vector_mode|train_prob
+# =========================
+CONFIGS=(
+  "baseline_no_llm_8threads_seed1|0|NONE|NONE|NONE|0.00"
+  "qwen3_embed_8threads_p010_seed1|1|Qwen/Qwen3-Embedding-0.6B|qwen_embedding|qwen_embedding|0.10"
+  "minilm_embed_8threads_p020_seed1|1|sentence-transformers/all-MiniLM-L6-v2|qwen_embedding|qwen_embedding|0.20"
+  "bge_small_embed_8threads_p020_seed1|1|BAAI/bge-small-en-v1.5|qwen_embedding|qwen_embedding|0.20"
+  "mpnet_embed_8threads_p020_seed1|1|sentence-transformers/all-mpnet-base-v2|qwen_embedding|qwen_embedding|0.20"
+  "bge_large_embed_8threads_p020_seed1|1|BAAI/bge-large-en-v1.5|qwen_embedding|qwen_embedding|0.20"
+)
+
+CONFIG="${CONFIGS[$SLURM_ARRAY_TASK_ID]}"
+IFS='|' read -r exp use_llm llm_model llm_backend llm_vector_mode train_prob <<< "${CONFIG}"
+
+# Generate master results directory baseline
+BASE_RESULTS_DIR="/data/class/mae93/nperroch/hanabi-lanuage/onpolicy/scripts/results/Hanabi/Hanabi-Full/mappo"
+
+# ==============================================================================
+# 🧠 AUTOMATED CHECKPOINT PATH RESOLVER
+# Searches inside the specific experiment directory to find 'actor*.pt'
+# (safely matching milestone suffix targets like actor_ep200.pt) and
+# extracts its exact parent folder path automatically.
+# ==============================================================================
+echo "Searching for active checkpoint file under: ${BASE_RESULTS_DIR}/${exp}"
+
+ACTOR_FILE_PATH=$(find "${BASE_RESULTS_DIR}/${exp}" -name "actor*.pt" 2>/dev/null | head -n 1)
+
+if [ -n "${ACTOR_FILE_PATH}" ]; then
+    MODEL_DIR=$(dirname "${ACTOR_FILE_PATH}")
+    echo "SUCCESS: Found saved checkpoint folder automatically: ${MODEL_DIR}"
+else
+    echo "WARNING: No actor*.pt file detected. Defaulting to base experiment directory."
+    MODEL_DIR="${BASE_RESULTS_DIR}/${exp}"
+fi
+# ==============================================================================
+
+# Create distinct experiment namespace to keep your WandB charts separated
+eval_exp="${exp}_EVAL_100PCT"
+
+echo "Evaluating Configuration: ${exp}"
+echo "Loading Checkpoint From: ${MODEL_DIR}"
+echo "Targeting WandB Run: ${eval_exp}"
+
+# Isolated network port management to block array collisions
+EMBED_HOST="127.0.0.1"
+EMBED_PORT=$((24000 + (SLURM_ARRAY_JOB_ID % 500) * 10 + SLURM_ARRAY_TASK_ID))
+
+# =========================
+# Optional embedding server
+# =========================
+if [ "${use_llm}" = "1" ]; then
+  echo "Starting background embedding server on ${EMBED_HOST}:${EMBED_PORT}..."
+
+  "${PYTHON}" -u onpolicy/envs/hanabi/qwen_embedding_server.py \
+    --model "${llm_model}" \
+    --host "${EMBED_HOST}" \
+    --port "${EMBED_PORT}" \
+    --device cuda \
+    > "${LOG_DIR}/eval_server_${eval_exp}_${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID}.log" 2>&1 &
+
+  EMBED_PID=$!
+
+  cleanup() {
+    echo "Cleaning up embedding server PID=${EMBED_PID}"
+    kill "${EMBED_PID}" 2>/dev/null || true
+  }
+  trap cleanup EXIT
+
+  echo "Waiting for embedding server validation..."
+  for i in {1..120}; do
+    # FIXED: Space trap fixed to safely match python's native dictionary formatting
+    if curl -s "http://${EMBED_HOST}:${EMBED_PORT}/health" | grep -iq '"ok": true'; then
+      echo "Embedding server ready after ${i} checks"
+      break
+    fi
+
+    if ! kill -0 "${EMBED_PID}" 2>/dev/null; then
+      echo "Embedding server died. Last log lines:"
+      tail -50 "${LOG_DIR}/eval_server_${eval_exp}_${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID}.log" || true
+      exit 1
+    fi
+    sleep 5
+  done
+else
+  echo "No LLM baseline: skipping embedding server step."
+fi
+
+# =========================
+# Build evaluation command
+# =========================
+CMD=(
+  "${PYTHON}" -u onpolicy/scripts/eval/eval_hanabi.py   # Target evaluation script
+  --env_name "${env}"
+  --algorithm_name "${algo}"
+  --experiment_name "${eval_exp}"
+  --hanabi_name "${hanabi}"
+  --num_agents "${num_agents}"
+  --seed 1
+  --n_training_threads 1
+  --n_rollout_threads "${rollout_threads}"
+  --n_eval_rollout_threads 10                           # Runs 10 concurrent simulation lines for speed
+  --num_mini_batch "${num_mini_batch}"
+  --episode_length 100
+  --num_env_steps 1000000000
+  --ppo_epoch 10
+  --gain 0.01
+  --lr 7e-4
+  --critic_lr 1e-3
+  --clip_param 0.1
+  --hidden_size 512
+  --layer_N 2
+  --entropy_coef 0.015
+  --log_interval 5
+  --use_eval
+  --use_wandb
+  --model_dir "${MODEL_DIR}"                            # Passes the dynamically resolved checkpoint folder path
+)
+
+if [ "${use_llm}" = "1" ]; then
+  CMD+=(
+    --use_llm
+    --llm_model "${llm_model}"
+    --llm_backend "${llm_backend}"
+    --llm_vector_mode "${llm_vector_mode}"
+    --llm_step_prob 1.0                                 # FORCED OVERRIDE TO 100% LLM USAGE MODE FOR EVAL
+    --qwen_embed_host "${EMBED_HOST}"
+    --qwen_embed_port "${EMBED_PORT}"
+  )
+fi
+
+echo "Starting Python Evaluation Loop at: $(date)"
+"${CMD[@]}"
+
+echo "Array Task Complete at: $(date)"
