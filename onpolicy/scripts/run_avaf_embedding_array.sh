@@ -145,7 +145,6 @@ CMD=(
   --algorithm_name "${algo}"
   --experiment_name "${exp}"
   --hanabi_name "${hanabi}"
-  --user_name nperroch-uci
   --num_agents "${num_agents}"
   --seed "${seed}"
   --n_training_threads 1
