@@ -84,7 +84,7 @@ echo "Searching for active checkpoint files under: ${BASE_RESULTS_DIR}/${exp}"
 
 # Temporarily suspend exit-on-error to allow empty lookup checks safely
 set +e
-ACTOR_FILES=($(find "${BASE_RESULTS_DIR}/${exp}" -name "actor*.pt" 2>/dev/null))
+ACTOR_FILES=($(find "${BASE_RESULTS_DIR}/${exp}*" -name "actor*.pt" 2>/dev/null))
 set -e
 
 if [ ${#ACTOR_FILES[@]} -gt 0 ]; then
