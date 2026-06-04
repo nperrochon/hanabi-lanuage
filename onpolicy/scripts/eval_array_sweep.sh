@@ -74,7 +74,7 @@ CONFIGS=(
 CONFIG="${CONFIGS[$SLURM_ARRAY_TASK_ID]}"
 IFS='|' read -r exp use_llm llm_model llm_backend llm_vector_mode train_prob <<< "${CONFIG}"
 
-BASE_RESULTS_DIR="/data/class/mae93/nperroch/hanabi-lanuage/onpolicy/scripts/results/Hanabi/Hanabi-Full/mappo"
+BASE_RESULTS_DIR="${REPO}/onpolicy/scripts/results/Hanabi/Hanabi-Full/mappo"
 
 # ==============================================================================
 # 🧠 ROBUST CHECKPOINT RESOLVER (SIGPIPE IMMUNE)
