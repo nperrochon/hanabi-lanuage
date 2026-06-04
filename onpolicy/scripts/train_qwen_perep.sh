@@ -100,7 +100,7 @@ trap cleanup EXIT
 echo "Waiting for embedding server..."
 for i in {1..120}; do
   # FIXED: Included the structural whitespace gap inside python's health output string match
-  if curl -s "http://${EMBED_HOST}:${EMBED_PORT}/health" | grep -iq '"ok": true'; then
+  if curl -s "http://${EMBED_HOST}:${EMBED_PORT}/health" | tr -d ' ' | grep -iq '"ok":true'; then
     echo "Embedding server ready after ${i} checks"
     curl -s "http://${EMBED_HOST}:${EMBED_PORT}/health"
     echo ""
