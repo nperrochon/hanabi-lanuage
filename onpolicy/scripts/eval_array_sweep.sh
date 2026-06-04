@@ -9,7 +9,6 @@
 #SBATCH --output=logs/slurm_eval_cmp_%A_%a.out
 #SBATCH --error=logs/slurm_eval_cmp_%A_%a.err
 
-# Enforce strict exit behavior immediately
 set -euo pipefail
 
 REPO="${HOME}/hanabi-lanuage"
@@ -18,10 +17,7 @@ mkdir -p "${LOG_DIR}"
 
 cd "${REPO}"
 
-# ==============================================================================
-# 🔄 FIXED CONDA SUB-SHELL INITIALIZATION
-# Mirrors your verified working hpc3 script layout precisely
-# ==============================================================================
+# Environment Initialization
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate qwen3_embed
 
@@ -49,9 +45,7 @@ echo "Started at: $(date)"
 
 nvidia-smi || true
 
-# =========================
 # Fixed Hanabi / PPO settings
-# =========================
 env="Hanabi"
 hanabi="Hanabi-Full"
 num_agents=2
@@ -59,9 +53,7 @@ algo="mappo"
 rollout_threads=1
 num_mini_batch=1
 
-# =========================
 # Define configs
-# =========================
 CONFIGS=(
   "baseline_no_llm_8threads_seed1|0|NONE|NONE|NONE|0.00"
   "qwen3_embed_8threads_p010_seed1|1|Qwen/Qwen3-Embedding-0.6B|qwen_embedding|qwen_embedding|0.10"
@@ -77,19 +69,34 @@ IFS='|' read -r exp use_llm llm_model llm_backend llm_vector_mode train_prob <<<
 BASE_RESULTS_DIR="${REPO}/onpolicy/scripts/results/Hanabi/Hanabi-Full/mappo"
 
 # ==============================================================================
-# 🧠 ROBUST CHECKPOINT RESOLVER (SIGPIPE IMMUNE)
-# Uses clean array collections to avoid pipeline termination crashes completely
+# 🧠 AUTOMATED CHECKPOINT RESOLVER & SYMLINK INJECTOR
+# Finds the highest version milestone file and creates standard named symlinks
+# to fulfill the expectations of base_runner.py without altering saved logs.
 # ==============================================================================
 echo "Searching for active checkpoint files under: ${BASE_RESULTS_DIR}/${exp}"
 
-# Temporarily suspend exit-on-error to allow empty lookup checks safely
 set +e
-ACTOR_FILES=($(find "${BASE_RESULTS_DIR}/${exp}*" -name "actor*.pt" 2>/dev/null))
+# Collect paths and sort them version-wise to guarantee grabbing the latest milestone
+ACTOR_FILES=($(find "${BASE_RESULTS_DIR}/${exp}" -name "actor*.pt" 2>/dev/null | sort -V))
 set -e
 
 if [ ${#ACTOR_FILES[@]} -gt 0 ]; then
-    MODEL_DIR=$(dirname "${ACTOR_FILES[0]}")
-    echo "SUCCESS: Found saved checkpoint folder automatically: ${MODEL_DIR}"
+    # Target the last element (the latest training milestone saved)
+    LATEST_ACTOR="${ACTOR_FILES[-1]}"
+    MODEL_DIR=$(dirname "${LATEST_ACTOR}")
+    ACTOR_FILENAME=$(basename "${LATEST_ACTOR}")
+
+    echo "SUCCESS: Discovered active checkpoint folder: ${MODEL_DIR}"
+    echo "Targeting checkpoint state file: ${ACTOR_FILENAME}"
+
+    # Generate explicit symlink for actor.pt
+    ln -sf "${ACTOR_FILENAME}" "${MODEL_DIR}/actor.pt"
+
+    # Calculate and link corresponding critic baseline profile
+    CRITIC_FILENAME=$(echo "${ACTOR_FILENAME}" | sed 's/actor/critic/')
+    if [ -f "${MODEL_DIR}/${CRITIC_FILENAME}" ]; then
+        ln -sf "${CRITIC_FILENAME}" "${MODEL_DIR}/critic.pt"
+    fi
 else
     echo "WARNING: No actor*.pt files found. Defaulting to base experiment directory."
     MODEL_DIR="${BASE_RESULTS_DIR}/${exp}"
@@ -100,9 +107,7 @@ eval_exp="${exp}_EVAL_100PCT"
 EMBED_HOST="127.0.0.1"
 EMBED_PORT=$((24000 + (SLURM_ARRAY_JOB_ID % 500) * 10 + SLURM_ARRAY_TASK_ID))
 
-# =========================
 # Optional embedding server
-# =========================
 if [ "${use_llm}" = "1" ]; then
   echo "Starting background embedding server on ${EMBED_HOST}:${EMBED_PORT}..."
 
@@ -139,9 +144,7 @@ else
   echo "No LLM baseline: skipping embedding server step."
 fi
 
-# =========================
 # Build evaluation command
-# =========================
 CMD=(
   "${PYTHON}" -u onpolicy/scripts/eval/eval_hanabi.py
   --env_name "${env}"
