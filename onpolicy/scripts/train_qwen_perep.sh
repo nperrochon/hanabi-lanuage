@@ -64,7 +64,7 @@ use_llm="1"
 llm_model="Qwen/Qwen3-Embedding-0.6B"
 llm_backend="qwen_embedding"
 llm_vector_mode="qwen_embedding"
-llm_step_prob="0.10"
+llm_step_prob="0.20"
 
 echo "Experiment: ${exp}"
 echo "Use LLM: ${use_llm}"
