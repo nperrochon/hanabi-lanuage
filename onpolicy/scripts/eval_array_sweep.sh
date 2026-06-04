@@ -3,18 +3,13 @@
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
-#SBATCH --time=1-00:00:00          # Evaluation completes significantly faster than training
-#SBATCH --array=0-5%6             # Maps perfectly across your 6 configurations
+#SBATCH --time=1-00:00:00
+#SBATCH --array=0-5%6
 #SBATCH --job-name=hanabi_eval_sweep
 #SBATCH --output=logs/slurm_eval_cmp_%A_%a.out
 #SBATCH --error=logs/slurm_eval_cmp_%A_%a.err
 
-# =========================
-# Environment setup
-# =========================
-set +u
-source ~/.bashrc
-conda activate qwen3_embed
+# Enforce strict exit behavior immediately
 set -euo pipefail
 
 REPO="${HOME}/hanabi-lanuage"
@@ -22,6 +17,13 @@ LOG_DIR="${REPO}/logs"
 mkdir -p "${LOG_DIR}"
 
 cd "${REPO}"
+
+# ==============================================================================
+# 🔄 FIXED CONDA SUB-SHELL INITIALIZATION
+# Mirrors your verified working hpc3 script layout precisely
+# ==============================================================================
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate qwen3_embed
 
 PYTHON="/home/nperroch/.conda/envs/qwen3_embed/bin/python"
 export PATH="/home/nperroch/.conda/envs/qwen3_embed/bin:$PATH"
@@ -54,12 +56,11 @@ env="Hanabi"
 hanabi="Hanabi-Full"
 num_agents=2
 algo="mappo"
-rollout_threads=1         # Standardized for baseline eval evaluation tracking
+rollout_threads=1
 num_mini_batch=1
 
 # =========================
 # Define configs
-# Format: name|use_llm|model|backend|vector_mode|train_prob
 # =========================
 CONFIGS=(
   "baseline_no_llm_8threads_seed1|0|NONE|NONE|NONE|0.00"
@@ -73,36 +74,29 @@ CONFIGS=(
 CONFIG="${CONFIGS[$SLURM_ARRAY_TASK_ID]}"
 IFS='|' read -r exp use_llm llm_model llm_backend llm_vector_mode train_prob <<< "${CONFIG}"
 
-# Generate master results directory baseline
 BASE_RESULTS_DIR="/data/class/mae93/nperroch/hanabi-lanuage/onpolicy/scripts/results/Hanabi/Hanabi-Full/mappo"
 
 # ==============================================================================
-# 🧠 AUTOMATED CHECKPOINT PATH RESOLVER
-# Searches inside the specific experiment directory to find 'actor*.pt'
-# (safely matching milestone suffix targets like actor_ep200.pt) and
-# extracts its exact parent folder path automatically.
+# 🧠 ROBUST CHECKPOINT RESOLVER (SIGPIPE IMMUNE)
+# Uses clean array collections to avoid pipeline termination crashes completely
 # ==============================================================================
-echo "Searching for active checkpoint file under: ${BASE_RESULTS_DIR}/${exp}"
+echo "Searching for active checkpoint files under: ${BASE_RESULTS_DIR}/${exp}"
 
-ACTOR_FILE_PATH=$(find "${BASE_RESULTS_DIR}/${exp}" -name "actor*.pt" 2>/dev/null | head -n 1)
+# Temporarily suspend exit-on-error to allow empty lookup checks safely
+set +e
+ACTOR_FILES=($(find "${BASE_RESULTS_DIR}/${exp}" -name "actor*.pt" 2>/dev/null))
+set -e
 
-if [ -n "${ACTOR_FILE_PATH}" ]; then
-    MODEL_DIR=$(dirname "${ACTOR_FILE_PATH}")
+if [ ${#ACTOR_FILES[@]} -gt 0 ]; then
+    MODEL_DIR=$(dirname "${ACTOR_FILES[0]}")
     echo "SUCCESS: Found saved checkpoint folder automatically: ${MODEL_DIR}"
 else
-    echo "WARNING: No actor*.pt file detected. Defaulting to base experiment directory."
+    echo "WARNING: No actor*.pt files found. Defaulting to base experiment directory."
     MODEL_DIR="${BASE_RESULTS_DIR}/${exp}"
 fi
 # ==============================================================================
 
-# Create distinct experiment namespace to keep your WandB charts separated
 eval_exp="${exp}_EVAL_100PCT"
-
-echo "Evaluating Configuration: ${exp}"
-echo "Loading Checkpoint From: ${MODEL_DIR}"
-echo "Targeting WandB Run: ${eval_exp}"
-
-# Isolated network port management to block array collisions
 EMBED_HOST="127.0.0.1"
 EMBED_PORT=$((24000 + (SLURM_ARRAY_JOB_ID % 500) * 10 + SLURM_ARRAY_TASK_ID))
 
@@ -129,7 +123,6 @@ if [ "${use_llm}" = "1" ]; then
 
   echo "Waiting for embedding server validation..."
   for i in {1..120}; do
-    # FIXED: Space trap fixed to safely match python's native dictionary formatting
     if curl -s "http://${EMBED_HOST}:${EMBED_PORT}/health" | grep -iq '"ok": true'; then
       echo "Embedding server ready after ${i} checks"
       break
@@ -150,7 +143,7 @@ fi
 # Build evaluation command
 # =========================
 CMD=(
-  "${PYTHON}" -u onpolicy/scripts/eval/eval_hanabi.py   # Target evaluation script
+  "${PYTHON}" -u onpolicy/scripts/eval/eval_hanabi.py
   --env_name "${env}"
   --algorithm_name "${algo}"
   --experiment_name "${eval_exp}"
@@ -159,7 +152,7 @@ CMD=(
   --seed 1
   --n_training_threads 1
   --n_rollout_threads "${rollout_threads}"
-  --n_eval_rollout_threads 10                           # Runs 10 concurrent simulation lines for speed
+  --n_eval_rollout_threads 10
   --num_mini_batch "${num_mini_batch}"
   --episode_length 100
   --num_env_steps 1000000000
@@ -174,7 +167,7 @@ CMD=(
   --log_interval 5
   --use_eval
   --use_wandb
-  --model_dir "${MODEL_DIR}"                            # Passes the dynamically resolved checkpoint folder path
+  --model_dir "${MODEL_DIR}"
 )
 
 if [ "${use_llm}" = "1" ]; then
@@ -183,7 +176,7 @@ if [ "${use_llm}" = "1" ]; then
     --llm_model "${llm_model}"
     --llm_backend "${llm_backend}"
     --llm_vector_mode "${llm_vector_mode}"
-    --llm_step_prob 1.0                                 # FORCED OVERRIDE TO 100% LLM USAGE MODE FOR EVAL
+    --llm_step_prob 1.0
     --qwen_embed_host "${EMBED_HOST}"
     --qwen_embed_port "${EMBED_PORT}"
   )
