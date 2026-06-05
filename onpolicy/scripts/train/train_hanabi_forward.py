@@ -231,13 +231,7 @@ def main(args):
         # With an LLM in the loop, each env step is expensive. Shorten episode_length
         # so we get more frequent policy updates for the same num_env_steps.
         # (Keep it at least 50 to preserve some temporal structure.)
-        old_len = all_args.episode_length
-        all_args.episode_length = max(50, old_len // 2)
-        print(
-            "Using shorter episode_length with LLM: {} -> {}".format(
-                old_len, all_args.episode_length
-            )
-        )
+
         if (
             getattr(all_args, "use_llm", False)
             and getattr(all_args, "llm_vector_mode", "") == "analysis_embedding"
