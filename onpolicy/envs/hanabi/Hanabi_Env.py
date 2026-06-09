@@ -959,11 +959,17 @@ class HanabiEnv(Environment):
                 if self.use_llm:
                     base_obs_dim += self.llm_feature_dim + 1
                     base_share_dim += self.llm_feature_dim + 1
+
                 obs = np.zeros(base_obs_dim, dtype=np.float32)
                 share_obs = np.zeros(base_share_dim, dtype=np.float32)
                 rewards = np.zeros((self.players, 1))
-                done = None
-                infos = {"score": self.state.score()}
+
+                # FIX: Change from None to True so SubprocVecEnv knows to reset
+                done = True
+
+                # Add a flag to your info dict so you can track how often this happens in WandB
+                infos = {"score": self.state.score(), "invalid_action_triggered": True}
+
                 available_actions = np.zeros(self.num_moves())
                 return obs, share_obs, rewards, done, infos, available_actions
             # Convert int action into a Hanabi move.

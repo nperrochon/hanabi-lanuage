@@ -37,6 +37,14 @@ export MKL_NUM_THREADS=1
 
 export WANDB_MODE=online
 export WANDB_SILENT=false
+# Add these right next to your other export variables (around line 35)
+
+# 1. Boost connection timeouts to 10 minutes (default is often 90 seconds)
+export WANDB_INIT_TIMEOUT=600
+export WANDB_HTTP_TIMEOUT=600
+
+# 2. Tell WandB to gracefully retry file streams during data throttles or blips
+export WANDB_RETRY_MAX=10
 export WANDB_CONSOLE=off
 export WANDB_DIR="${REPO}/wandb"
 mkdir -p "${WANDB_DIR}"
