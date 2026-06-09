@@ -47,6 +47,7 @@ export WANDB_HTTP_TIMEOUT=600
 export WANDB_RETRY_MAX=10
 export WANDB_CONSOLE=off
 export WANDB_DIR="${REPO}/wandb"
+
 mkdir -p "${WANDB_DIR}"
 
 echo "Job ID: ${SLURM_JOB_ID}"
@@ -170,8 +171,8 @@ CMD=(
   --hidden_size 512
   --layer_N 2
   --entropy_coef 0.015
-  --log_interval 5
-  --save_every_x_updates 200
+  --log_interval 50
+  --save_every_x_updates 2000
 )
 
 if [ "${use_llm}" = "1" ]; then
