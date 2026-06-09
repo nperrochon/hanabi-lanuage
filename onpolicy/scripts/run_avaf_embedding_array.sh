@@ -79,12 +79,14 @@ num_mini_batch=1
 #   "baseline_no_llm_8threads_seed1|0|NONE|NONE|NONE|0.00"
 
 CONFIGS=(
-  "qwen3_embed_8threads_p030_seed1|1|Qwen/Qwen3-Embedding-0.6B|qwen_embedding|qwen_embedding|0.30"
-  "qwen3_embed_8threads_p040_seed1|1|Qwen/Qwen3-Embedding-0.6B|qwen_embedding|qwen_embedding|0.40"
-  "minilm_embed_8threads_p040_seed1|1|sentence-transformers/all-MiniLM-L6-v2|qwen_embedding|qwen_embedding|0.40"
-  "bge_small_embed_8threads_p020_seed1|1|BAAI/bge-small-en-v1.5|qwen_embedding|qwen_embedding|0.20"
-  "mpnet_embed_8threads_p030_seed1|1|sentence-transformers/all-mpnet-base-v2|qwen_embedding|qwen_embedding|0.30"
-  "bge_large_embed_8threads_p030_seed1|1|BAAI/bge-large-en-v1.5|qwen_embedding|qwen_embedding|0.30"
+  "qwen3_embed_8threads_p020_seed1|1|Qwen/Qwen3-Embedding-0.6B|qwen_embedding|qwen_embedding|0.20"
+  "qwen3_embed_8threads_p020_seed1|1|Qwen/Qwen3-Embedding-4B|qwen_embedding|qwen_embedding|0.20"
+  "qwen3_embed_8threads_p020_seed1|1|Qwen/Qwen3-Embedding-8B|qwen_embedding|qwen_embedding|0.20"
+  "qwen3_embed_8threads_p080_seed1|1|Qwen/Qwen3-Embedding-0.6B|qwen_embedding|qwen_embedding|0.80"
+  "minilm_embed_8threads_p080_seed1|1|sentence-transformers/all-MiniLM-L6-v2|qwen_embedding|qwen_embedding|0.80"
+  "bge_small_embed_8threads_p050_seed1|1|BAAI/bge-small-en-v1.5|qwen_embedding|qwen_embedding|0.50"
+  "mpnet_embed_8threads_p050_seed1|1|sentence-transformers/all-mpnet-base-v2|qwen_embedding|qwen_embedding|0.50"
+  "bge_large_embed_8threads_p050_seed1|1|BAAI/bge-large-en-v1.5|qwen_embedding|qwen_embedding|0.50"
 )
 
 CONFIG="${CONFIGS[$SLURM_ARRAY_TASK_ID]}"
