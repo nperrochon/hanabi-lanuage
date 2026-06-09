@@ -1,4 +1,3 @@
-from turtle import up
 import wandb
 import os
 import numpy as np
@@ -123,7 +122,10 @@ class Runner(object):
 
             # Value normalizer / PopArt
             if "value_normalizer_state_dict" in ckpt:
-                if hasattr(self.trainer, "value_normalizer") and self.trainer.value_normalizer is not None:
+                if (
+                    hasattr(self.trainer, "value_normalizer")
+                    and self.trainer.value_normalizer is not None
+                ):
                     if hasattr(self.trainer.value_normalizer, "load_state_dict"):
                         self.trainer.value_normalizer.load_state_dict(
                             ckpt["value_normalizer_state_dict"]
@@ -181,7 +183,7 @@ class Runner(object):
         return train_infos
 
     def save(self, update_num=0, final=False):
-        """Save full training state for real resume."""
+        """Save full training state for real resume and force live cloud backup."""
         suffix = "" if final else f"_ep{update_num}"
         ckpt_path = (
             os.path.join(self.save_dir, "checkpoint.pt")
@@ -215,7 +217,10 @@ class Runner(object):
             )
 
         # Value normalizer / PopArt
-        if hasattr(self.trainer, "value_normalizer") and self.trainer.value_normalizer is not None:
+        if (
+            hasattr(self.trainer, "value_normalizer")
+            and self.trainer.value_normalizer is not None
+        ):
             if hasattr(self.trainer.value_normalizer, "state_dict"):
                 checkpoint["value_normalizer_state_dict"] = (
                     self.trainer.value_normalizer.state_dict()
@@ -230,18 +235,40 @@ class Runner(object):
         checkpoint["recurrent_N"] = self.recurrent_N
         checkpoint["update_num"] = update_num
 
+        # 1. Save full checkpoint locally
         torch.save(checkpoint, ckpt_path)
         print(f"Saved full checkpoint to {ckpt_path}")
 
-        # Optional: keep old files too for eval compatibility
-        torch.save(
-            self.trainer.policy.actor.state_dict(),
-            os.path.join(self.save_dir, "actor.pt" if final else f"actor_ep{update_num}.pt"),
+        # 2. Save separate actor/critic weights locally
+        actor_path = os.path.join(
+            self.save_dir, "actor.pt" if final else f"actor_ep{update_num}.pt"
         )
-        torch.save(
-            self.trainer.policy.critic.state_dict(),
-            os.path.join(self.save_dir, "critic.pt" if final else f"critic_ep{update_num}.pt"),
+        critic_path = os.path.join(
+            self.save_dir, "critic.pt" if final else f"critic_ep{update_num}.pt"
         )
+
+        torch.save(self.trainer.policy.actor.state_dict(), actor_path)
+        torch.save(self.trainer.policy.critic.state_dict(), critic_path)
+
+        # ==========================================
+        # NEW CODE: FORCE IMMEDIATE WANDB CLOUD SYNC
+        # ==========================================
+        if self.use_wandb:
+            try:
+                # policy="live" tells wandb to upload immediately rather than waiting
+                # for the training script to finish or exit cleanly.
+                wandb.save(ckpt_path, base_path=self.save_dir, policy="live")
+                wandb.save(actor_path, base_path=self.save_dir, policy="live")
+                wandb.save(critic_path, base_path=self.save_dir, policy="live")
+                print(
+                    f"🚀 Live cloud upload triggered for epoch {update_num} checkpoints.",
+                    flush=True,
+                )
+            except Exception as e:
+                print(
+                    f"⚠️ Warning: Cloud checkpoint upload failed (will continue training): {e}",
+                    flush=True,
+                )
 
     def restore(self, model_dir):
         """Restore full training state if available; otherwise fall back to actor/critic only."""
@@ -292,16 +319,16 @@ class Runner(object):
         print("Loaded legacy actor.pt / critic.pt only")
 
     def log_train(self, train_infos, total_num_steps):
-            """
-            Log training info.
-            :param train_infos: (dict) information about training update.
-            :param total_num_steps: (int) total number of training env steps.
-            """
-            for k, v in train_infos.items():
-                if self.use_wandb:
-                    wandb.log({k: v}, step=total_num_steps)
-                else:
-                    self.writter.add_scalars(k, {k: v}, total_num_steps)
+        """
+        Log training info.
+        :param train_infos: (dict) information about training update.
+        :param total_num_steps: (int) total number of training env steps.
+        """
+        for k, v in train_infos.items():
+            if self.use_wandb:
+                wandb.log({k: v}, step=total_num_steps)
+            else:
+                self.writter.add_scalars(k, {k: v}, total_num_steps)
 
     def log_env(self, env_infos, total_num_steps):
         """
